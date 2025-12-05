@@ -1,0 +1,5 @@
+.DS_STORE
+images/
+__pycache__/
+Python_VSCode_Files/
+venv/
