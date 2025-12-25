@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np 
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
+from utils.performance import time_it, time_block
 
 class Duodenum():
         
@@ -218,17 +219,27 @@ class Duodenum():
         return dSlDdt
     
     #----------- solve for the values of duodenum crude protein (CP, g) using solve_ivp --------------------------#
+    @time_it
     def solving_duo_USl(self):
         self.init_Duo_CPu[0] = self.result_UDnode0.y.T[0, -1]
-        
         self.init_Duo_CPsl[0] = self.result_SlDnode0.y.T[0, -1]
   
-        self.UDexit_SS = solve_ivp(self.Solve_method_of_lines_CPu_Duo, self.t_span, self.init_Duo_CPu, t_eval=self.t_eval, 
-                                   dense_output=True, method='Radau')
-        #Radau implicit runge kutta method, good for stiff differential-algebraic equations, stability and accuracy
-
-        self.SlDexit_SS = solve_ivp(self.Solve_method_of_lines_CPsl_Duo, self.t_span, self.init_Duo_CPsl, t_eval=self.t_eval, 
+        self.UDexit_SS = solve_ivp(self.Solve_method_of_lines_CPu_Duo, 
+                                    self.t_span, 
+                                    self.init_Duo_CPu, 
+                                    t_eval=self.t_eval, 
                                     dense_output=True, method='Radau')
+            #Radau implicit runge kutta method, good for stiff differential-algebraic equations, stability and accuracy           
+
+        #V: This is the largest bottleneck in the whole model right now. 
+        # Consider either moving to JAX (to use GPU) or Julia (DifferentialEquations.jl) via diffeqpy
+        #  or determine a way to multi-thread this
+        with time_block("Solving duodenum slowly-digested protein equations"):
+            self.SlDexit_SS = solve_ivp(self.Solve_method_of_lines_CPsl_Duo, 
+                                        self.t_span, 
+                                        self.init_Duo_CPsl, 
+                                        t_eval=self.t_eval, 
+                                        dense_output=True, method='Radau')
 
     
     #----prepping data for next compartment - undigestible----#  
@@ -279,6 +290,7 @@ class Duodenum():
     # df_SlP_DUO = pd.DataFrame(df_SlP_d)  
 
     #------slowly- to rapidly-digested protein in duodenum setup------------#
+    @time_it
     def SlP_for_RP_d(self):
         self.flatten_result_duo_CPsl()
         df_Q_CPsl_Duo = self.df_SlP_d[['t', 'QCPsl_duo']] #pulling out just the relavent columns from the df_cpvg dataframe
@@ -332,6 +344,7 @@ class Duodenum():
         dRDdt, _, _ = self.method_of_lines_CPr_Duo(t, QCPr_Duo_g)
         return dRDdt
     
+    @time_it
     def solving_duo_R(self):
         self.df_Q_CPsl_Duo, self.Duo_CPsl_Q = self.SlP_for_RP_d()
 
@@ -400,7 +413,7 @@ class Duodenum():
         return self.df_feed_d, flattened_data_duo_feed 
     
         #----------Plots results from duodenum----------------------#
-    def plot_duo(self):
+def plot_duo(self):
 
         plt.clf() 
         plt.plot(self.df_UP_d['t'], self.df_UP_d['QCPu_duo'], color='blue') #, label='Undigestible Protein_duodenum g'

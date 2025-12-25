@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np 
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
+from utils.performance import time_it
 
 class Ileum():
     
@@ -172,6 +173,7 @@ class Ileum():
         dSlIdt, _ = self.method_of_lines_Ileum_CPsl(t, QCPsl_Il_g)
         return dSlIdt
     
+    @time_it
     def solving_il_USl(self):
 
         self.init_Il_CPu[0] = self.UJexit_SS.y.T[0, -1]/self.Il_single_node_V
@@ -288,6 +290,7 @@ class Ileum():
         dRIdt, _ = self.method_of_lines_CPr_Il(t, QCPr_Il_g)
         return dRIdt
     
+    @time_it
     def solving_il_R(self):
         self.df_Q_CPsl_Il, self.Il_CPsl = self.SlP_for_RP_i()
 
@@ -333,6 +336,7 @@ class Ileum():
         dfeedildt, _, _ = self.feed_il(t, Qfeed_Il_g)
         return dfeedildt
     
+    @time_it
     def solving_il_feed(self):
         self.iIl_g = [0.00000000001]
         self.result_feed_il = solve_ivp(self.solve_feed_il, self.t_span, y0=self.iIl_g, t_eval=self.t_eval, dense_output=True, method='RK45')

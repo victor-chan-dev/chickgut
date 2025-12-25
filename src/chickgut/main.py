@@ -24,11 +24,17 @@ import os
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 from scipy.optimize import differential_evolution
+from pathlib import Path
 
 "Import classes"
-from src.chickgut.anatomy.duodenum import Duodenum
-from src.chickgut.anatomy.jejunum import Jejunum
-from src.chickgut.anatomy.ileum import Ileum
+from anatomy.duodenum import Duodenum
+from anatomy.jejunum import Jejunum
+from anatomy.ileum import Ileum
+from utils.performance import time_it, time_block
+
+PACKAGE_DIR = Path(__file__).resolve().parent
+RESOURCE_DIR = PACKAGE_DIR / "resources"
+diets_file = RESOURCE_DIR / "Plug_Flow_Diet_Charac.csv"
 
 csv_datafiles = 'Python_VSCode_Files' #setup for saving files later with relative paths
 os.makedirs(csv_datafiles, exist_ok=True) #makes sure that this folder exists
@@ -43,11 +49,9 @@ t_eval = np.arange(0.0,tstp+maxt,cint)
 #                                    appropriate t and statevars values; simresults are reported every cint
 
 #---------Importing diet constant variables-----------------------#
-script_dir = os.path.abspath("Plug_Flow_Diet_Charac.csv")
-
-df_ing = pd.read_csv(script_dir)
-print(df_ing)
-ingr_const = df_ing.set_index('Ingredient').T.to_dict() #sets index to apply to each ingredient and then transposes it, creating dictionaries
+plug_flow_diets = pd.read_csv(diets_file)
+print(plug_flow_diets)
+ingr_const = plug_flow_diets.set_index('Ingredient').T.to_dict() #sets index to apply to each ingredient and then transposes it, creating dictionaries
 def get_ing_const(ingr_name):
     if ingr_name in ingr_const:             #checks if ingr_name matches an existing key(i.e. ingredient) in ingr_cost
         return ingr_const[ingr_name]        #if ingr_name in ingr_cost is true, it returns the value (the dictonary) associated with the ingredient
@@ -247,18 +251,19 @@ result_fore, iDuo_g, BWeight_kgb, Kp_PVG_min = GIT(t_eval, t_span) #V: Only this
 print("finished foregut") # V: Also indicate the time & parameters (perhaps the kind of feed)
 
 #V: This is also important. Maybe move to another module
+@time_it
 def HindGIT(ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog_min):
     #1. creating duodenum, jejunum and ileum
     duodenum_instance = Duodenum(t_span, iDuo_g, t_eval, result_fore, BWeight_kgb, Kp_PVG_min, constants, k_absp, k_digestrate, Kp_endog_min)
     jejunum_instance = Jejunum(t_span,  t_eval, constants, BWeight_kgb, k_absp, k_digestrate, Kp_endog_min)
     ileum_instance = Ileum(t_span, t_eval, constants, BWeight_kgb, k_absp, k_digestrate, Kp_endog_min)
     
-    #3. calculate basic properties
+    #2. calculate basic properties
     duodenum_instance.calculate_duo_prop()
     jejunum_instance.calculate_jej_prop()
     ileum_instance.calculate_Il_prop()
 
-    #2. calculate volumes for all compartments to be used to calculate endogenous 
+    #3. calculate volumes for all compartments to be used to calculate endogenous 
     duodenum_instance.calculate_V(jejunum_instance, ileum_instance)
     jejunum_instance.calculate_V(duodenum_instance, ileum_instance)
     ileum_instance.calculate_V(duodenum_instance, jejunum_instance)
@@ -268,46 +273,56 @@ def HindGIT(ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog
     jejunum_instance.calculate_jej_endog()
     ileum_instance.calculate_Il_endog()
 
-    #5. run duodenum to get exit values
-    duodenum_instance.solving_Unode0()
-    duodenum_instance.solving_duo_USl()
-    duodenum_instance.solving_duo_R()
-    duodenum_instance.solving_duo_feed()
-    duodenum_instance.flatten_result_duo_CPu()
-    duodenum_instance.flatten_result_duo_CPsl()
-    duodenum_instance.flatten_result_duo_CPr()
-    duodenum_instance.flatten_result_duo_feed()
-    duodenum_instance.plot_duo()
+    with time_block("\n~~~Calculating duodenum properties"):
+        #5. run duodenum to get exit values
+        with time_block("Solving duodenum equations"):
+            duodenum_instance.solving_Unode0()
+            duodenum_instance.solving_duo_USl()
+            duodenum_instance.solving_duo_R()
+            duodenum_instance.solving_duo_feed()
+        with time_block("Flattening duodenum results"):
+            duodenum_instance.flatten_result_duo_CPu()
+            duodenum_instance.flatten_result_duo_CPsl()
+            duodenum_instance.flatten_result_duo_CPr()
+            duodenum_instance.flatten_result_duo_feed()
+        # duodenum_instance.plot_duo()
+        Duo_single_node_V = duodenum_instance.calculate_duo_prop()
+        Kp_Duo_min = duodenum_instance.calculate_duo_prop()
+        print("finished duodenum")
 
-    Duo_single_node_V = duodenum_instance.calculate_duo_prop()
-    Kp_Duo_min = duodenum_instance.calculate_duo_prop()
-    print("finished duodenum") #: Update to print out the time taken
-
-    #6. set exit values for jejunum from duo and run jej to get jej exit values
-    jejunum_instance.Duo_results(duodenum_instance)
-    jejunum_instance.solving_jej_USl()
-    jejunum_instance.solving_jej_R()
-    jejunum_instance.solving_jej_feed()
-    jejunum_instance.flatten_result_jej_CPu()
-    jejunum_instance.flatten_result_jej_CPsl()
-    jejunum_instance.flatten_result_jej_CPr()
-    jejunum_instance.flatten_result_jej_feed()
-    jejunum_instance.plot_jej()
     
-    Discretize_jej = jejunum_instance.calculate_jej_prop()
-    print("finished jejunum")
 
-    #7. set exit values for ileum from jej and run ileum to get ileum exit values
-    ileum_instance.Jej_results(jejunum_instance)
-    ileum_instance.solving_il_USl()
-    ileum_instance.solving_il_R()
-    ileum_instance.solving_il_feed()
-    ileum_instance.flatten_result_il_CPu()
-    ileum_instance.flatten_result_il_CPsl()
-    ileum_instance.flatten_result_il_CPr()
-    ileum_instance.flatten_result_il_feed()
-    ileum_instance.plot_il() #V: When calculating the ileum, is it necessary to plot it out each time?
-    print("finished ileum")
+    with time_block("\n~~~Calculating jejunum properties"):
+        #6. set exit values for jejunum from duo and run jej to get jej exit values
+        with time_block("Solving jejunum equations"):
+            jejunum_instance.Duo_results(duodenum_instance)
+            jejunum_instance.solving_jej_USl()
+            jejunum_instance.solving_jej_R()
+            jejunum_instance.solving_jej_feed()
+        with time_block("Flattening jejunum results"):
+            jejunum_instance.flatten_result_jej_CPu()
+            jejunum_instance.flatten_result_jej_CPsl()
+            jejunum_instance.flatten_result_jej_CPr()
+            jejunum_instance.flatten_result_jej_feed()
+        # jejunum_instance.plot_jej()
+        Discretize_jej = jejunum_instance.calculate_jej_prop()
+        print("finished jejunum")
+
+    with time_block("\n~~~Calculating ileum properties"):
+        Kp_Jej_min = jejunum_instance.calculate_jej_prop()
+        #7. set exit values for ileum from jej and run ileum to get ileum exit values
+        with time_block("Solving ileum equations"):
+            ileum_instance.Jej_results(jejunum_instance)
+            ileum_instance.solving_il_USl()
+            ileum_instance.solving_il_R()
+            ileum_instance.solving_il_feed()
+        with time_block("Flattening ileum results"):
+            ileum_instance.flatten_result_il_CPu()
+            ileum_instance.flatten_result_il_CPsl()
+            ileum_instance.flatten_result_il_CPr()
+        ileum_instance.flatten_result_il_feed()
+        # ileum_instance.plot_il() 
+        print("finished ileum")
     
     return duodenum_instance, jejunum_instance, ileum_instance
 
@@ -414,7 +429,6 @@ def export_duojejil_results(duodenum_instance, jejunum_instance, ileum_instance)
             df_SlP_i.to_excel(writer, sheet_name='Ileum_sl_degrable_atexit', index=False)
             df_RI.to_excel(writer, sheet_name='Ileum_rapid_degrad', index=False)
             df_RP_i.to_excel(writer, sheet_name='Ileum_rapid_degrad_atexit', index=False)
-            #df_total.to_excel(writer, sheet_name='Ileum_total_atexit', index=False)
 
     export_duo()    
     export_jej()
@@ -435,7 +449,7 @@ def optimize_params(t_eval, t_span, ingr_name):
     def SSE_function(opt_params): #the 800 values
         nonlocal evaluation_count
         evaluation_count += 1
-        print(f"Evaluation {evaluation_count}")
+        print(f"\n##Evaluation {evaluation_count}")
 
         k_absp = opt_params[0]
         k_digestrate = opt_params[1]
@@ -498,8 +512,13 @@ def optimize_params(t_eval, t_span, ingr_name):
     # This has roughly 50 different combos
     # Ideally we want popsize to 100, maxiter to 1000
     # This whole things should run 100 times, since the differential evolution changes each time
+    # Total evaluations = popsize × (maxiter + 1)
     # This diff_ev takes the longest
-    Optimize_params_result = differential_evolution(SSE_function, bounds_params, popsize=3, maxiter=2, callback=my_callback) #L-BFGS-B
+    Optimize_params_result = differential_evolution(SSE_function, 
+                                                    bounds_params, 
+                                                    popsize=1, 
+                                                    maxiter=1, 
+                                                    callback=my_callback) #L-BFGS-B
         #seed = random number for reproducibility, diff_evol can get diff result on diff runs
         #i.e. getting same sequence of random numbers each time code is run, any integer works and doesn't have a specific meaning
         #workers ---> for parallization i.e. running multiple computations at the same time using different CPU cores for faster results

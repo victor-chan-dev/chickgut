@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np 
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
-
+from utils.performance import time_it
 
 class Jejunum():
 
@@ -178,6 +178,7 @@ class Jejunum():
         dDJdt, _ = self.method_of_lines_Jej_CPsl(t, QCPsl_Jej_g)
         return dDJdt
 
+    @time_it
     def solving_jej_USl(self):
 
         self.init_Jej_CPu[0] = self.UDexit_SS.y.T[0, -1]/self.Jej_single_node_V
@@ -280,6 +281,7 @@ class Jejunum():
         return dRDdt
                 
     #print(f"Shape of y0: {init_UD.shape}")
+    @time_it
     def solving_jej_R(self):
         self.df_Q_CPsl_Jej, self.Jej_CPsl = self.SlP_for_RP_j()
         self.init_Jej_CPr[0] = self.RDexit_SS.y.T[0, -1]/self.Jej_single_node_V
@@ -323,6 +325,7 @@ class Jejunum():
         dfeedjejdt, _, _ = self.feed_jej(t, Qfeed_Jej_g)
         return dfeedjejdt
     
+    @time_it
     def solving_jej_feed(self):
         self.iJej_g = [0.00000000001]
         self.result_feed_jej = solve_ivp(self.solve_feed_jej, self.t_span, y0=self.iJej_g, t_eval=self.t_eval, dense_output=True, method='RK45')
