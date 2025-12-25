@@ -8,6 +8,7 @@ is left after a chicken poops.
 * Restructure the python code
 * Move critical code out of main.py and into its own separate area
 * Write tests to verify existing functionality
+* Write a "How do you run this" guide in the ReadMe
 * Time each part to understand bottle necks
 * Replace existing differential evolution solution with scipy to use pymoo
     * Add checkpointing via pymoo + pickles

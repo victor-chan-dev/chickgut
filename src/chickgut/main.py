@@ -26,9 +26,9 @@ from scipy.integrate import solve_ivp
 from scipy.optimize import differential_evolution
 
 "Import classes"
-from Duodenum_Class import Duodenum
-from Jejunum_Class import Jejunum
-from Ileum_Class import Ileum
+from src.chickgut.anatomy.duodenum import Duodenum
+from src.chickgut.anatomy.jejunum import Jejunum
+from src.chickgut.anatomy.ileum import Ileum
 
 csv_datafiles = 'Python_VSCode_Files' #setup for saving files later with relative paths
 os.makedirs(csv_datafiles, exist_ok=True) #makes sure that this folder exists

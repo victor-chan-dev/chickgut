@@ -1,0 +1,51 @@
+# Minimal pyproject.toml template. Update fields and dependencies to match your code, README and requirements.txt.
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chickgut"                     # update to your package name (lowercase, no spaces)
+version = "0.1.0"                  # update according to your versioning
+description = "This package simulates avian digestion to optimize feed efficiency by analyzing the protein content remaining in poultry excrement."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }         # change if different
+authors = [
+    { name = "Grace Hong", email = "grace.grace@grace.com" },
+    { name = "Victor Chan", email = "victor.control@gmail.com" }
+]
+keywords = ["chickgut"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+# Replace the example dependencies below with the exact entries from your requirements.txt
+dependencies = [
+    "requests>=2.28",     # example; remove or replace with actual requirements
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "scipy",
+    "openpyxl"
+]
+
+# Dev/test tooling; replace or extend to match your dev requirements
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=23.0",
+    "isort>=5.0",
+    "mypy>=0.991",
+]
+
+# If your package code is under src/, setuptools will find it there.
+# If you use a flat layout (package dir at repo root), change where accordingly or remove.
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Example console script; change module:path to your actual entry point if you have one.
+[project.scripts]
+chickgut = "chickgut.__main__:main"
