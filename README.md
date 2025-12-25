@@ -4,18 +4,29 @@ This package models the intestinal tract of a chicken
 It's main purpose is to determine which feeds are most optimal by determining how much protein
 is left after a chicken poops.
 
+# How to run
+* Run the following in bash/terminal
+```
+python PATH_TO_PACKAGE/chickgut/main.py
+```
+
 # Todo List:
-* Restructure the python code ✅
 * Move critical code out of main.py and into its own separate area 
 * Write tests to verify existing functionality
-* Write a "How do you run this" guide in the ReadMe
-* Time each part to understand bottle necks ✅
-    * Bottlenecks are caused by the `solve_ivp` function. Ideally move to JAX to use GPU instead
-* Replace existing differential evolution solution with scipy to use pymoo
+    * Add a code coverage report so I can see what's covered and what's not
+    * Use AI to write the tests. Very light, but necessary since I don't understand all the calculations
+* !Bottlenecks are caused by the `solve_ivp` function. Ideally move to JAX to use GPU instead
+* !Replace existing differential evolution solution with scipy to use pymoo
     * Add checkpointing via pymoo + pickles
-* *Bonus* - Find out how to implement a Digital Twin-like system where we can have multiple computers computing at once 
-    * V: This might not be necessary
 
+## Done
+* Restructure the python code ✅
+* Write a "How do you run this" guide in the ReadMe ✅
+* Time each part to understand bottle necks ✅
+
+## Maybe
+* *Bonus* - Find out how to implement a Digital Twin-like system where we can have multiple computers computing at once 
+    * V: This is not necessary since this would require 2 computers. It's a nice-to-have for something more complex
 
 # Personal Notes
 * Rough calculations show that for the ideal popsize of 100 & maxiter of 1000 it'll be 100K evaluations. 
