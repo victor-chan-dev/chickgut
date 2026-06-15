@@ -60,9 +60,10 @@ PYTHONPATH=src venv/bin/python tests/generate_golden_data.py
 # Personal Notes & Insights
 
 * **Performance & Scale Challenge**:
-  * With a population size of 100 and 1,000 maximum iterations, the optimization requires **100,000 evaluations**.
-  * At 37 seconds per evaluation, this takes **1,027 hours (~42 days)** to complete. Even if stripped to pure ODE speed (~9 seconds), it still takes **250 hours (~10 days)**.
-  * **Solution Strategy**: Run feed ingredient optimizations sequentially (one at a time) with persistent checkpointing (saving progress) and parallelize execution across CPU cores.
+  * Original assumption: With a population size of 100 and 1,000 maximum iterations, the optimization would require **100,000 evaluations**. At 37s per evaluation, this would take **~42 days**.
+  * Realistic optimization bounds: Since we are only optimizing 3 parameters (`k_absp`, `k_digestrate`, `Kp_endog_min`), standard Differential Evolution rules dictate a population size of 10-20x the parameter count (~40) and convergence within ~150 iterations. This yields a realistic max of **6,000 evaluations**.
+  * With our JAX/Pandas-bypass dropping single evaluation time to ~6.9s, 6,000 evaluations takes **~11.5 hours** on a single core.
+  * **Solution Strategy**: Implement `pymoo` to parallelize execution across CPU cores. On a standard 12-core system, a single feed ingredient optimization will drop from 11.5 hours down to **~57 minutes**.
 * **Apparent Digestibility of Protein**:
   * Feed efficiency is measured by how much protein is absorbed. The lower the remaining protein flux at the end of the ileum, the more digestible the feed ingredient.
 
