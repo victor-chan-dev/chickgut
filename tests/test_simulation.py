@@ -310,9 +310,10 @@ def test_optimize_params_success():
 
     class MockCompartment:
         def __init__(self):
-            self.df_RP_i = mock_df
-            self.df_UP_i = mock_df
-            self.df_SlP_i = mock_df
+            pass
+            
+        def get_flux_sums(self, limit=2001):
+            return 10.0, 10.0, 10.0
 
     mock_duo = MockCompartment()
     mock_jej = MockCompartment()
@@ -339,7 +340,10 @@ def test_optimize_params_success():
             t_span=(0, 10),
             ingr_name="sbm",
             constants=constants,
-            output_dir=str(TEMP_TEST_DIR)
+            output_dir=str(TEMP_TEST_DIR),
+            n_threads=1,
+            pop_size=2,
+            n_gen=1
         )
         
         # Verify returned structure
@@ -347,10 +351,10 @@ def test_optimize_params_success():
         k_absp_opt, k_digestrate_opt, Kp_endog_min_opt, best_x, duo_opt, jej_opt, il_opt = res
         
         # Verify files were created
-        expected_pickle = TEMP_TEST_DIR / "best_solution.pkl"
+        expected_pickle = TEMP_TEST_DIR / "checkpoint.pkl"
         expected_excel = TEMP_TEST_DIR / "optimization_results.xlsx"
         
-        assert expected_pickle.exists(), "best_solution.pkl was not created"
+        assert expected_pickle.exists(), "checkpoint.pkl was not created"
         assert expected_excel.exists(), "optimization_results.xlsx was not created"
         
         # Verify optimization excel content
@@ -358,13 +362,16 @@ def test_optimize_params_success():
         assert "k_absp_sbm" in df_res.columns
         assert len(df_res) > 0
 
-        # 2. Run it again to verify loading of existing best_solution.pkl works
+        # 2. Run it again to verify loading of existing checkpoint.pkl works
         res2 = optimize_params(
             t_eval=np.arange(0, 10, 1),
             t_span=(0, 10),
             ingr_name="sbm",
             constants=constants,
-            output_dir=str(TEMP_TEST_DIR)
+            output_dir=str(TEMP_TEST_DIR),
+            n_threads=1,
+            pop_size=2,
+            n_gen=1
         )
         assert len(res2) == 7
 
