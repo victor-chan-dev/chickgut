@@ -1,5 +1,11 @@
-# pandas
-# numpy
-# matplotlib
-# scipy
-# openpyxl
+pandas
+numpy
+matplotlib
+scipy
+openpyxl
+jax
+jaxlib
+diffrax
+equinox
+jaxtyping
+pymoo

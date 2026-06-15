@@ -5,9 +5,45 @@ It's main purpose is to determine which feeds are most optimal by determining ho
 is left after a chicken poops.
 
 # How to run
-* Run the following in bash/terminal to run the interactive simulation:
+
+### Setup Instructions for Beginners (Brand New Computer)
+
+If you are on a brand new computer and have little to no experience running Python code, follow these exact steps to get the simulation working:
+
+1. **Install Python**: You need Python to run this code. Download and install Python (version 3.8 or higher) from the official website: [python.org/downloads](https://www.python.org/downloads/). During installation (especially on Windows), make sure to check the box that says **"Add Python to PATH"**.
+2. **Open your Terminal / Command Prompt**: 
+   - *Mac/Linux*: Open the application called **Terminal**.
+   - *Windows*: Open the application called **Command Prompt** (or PowerShell).
+3. **Navigate to the Project Folder**: Use the `cd` command to enter the folder where you saved this project. For example:
+   ```bash
+   cd /path/to/protein_chicken
+   ```
+4. **Create a Virtual Environment**: This creates an isolated "sandbox" for the project so its dependencies don't mess up your computer. Run:
+   ```bash
+   python3 -m venv venv
+   ```
+   *(Note: On Windows, you might just need to type `python -m venv venv`)*
+5. **Activate the Environment**: You must activate the sandbox before installing anything.
+   - *Mac/Linux*: `source venv/bin/activate`
+   - *Windows*: `venv\Scripts\activate`
+   *(You should see `(venv)` appear at the beginning of your terminal prompt).*
+6. **Install the Required Libraries**: Now, install all the scientific tools the project needs (like NumPy, Pandas, JAX, etc.) by running:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### Running the Interactive Simulation
+Once everything is installed (and while your `(venv)` is still active), you can run the program:
+
+**Mac/Linux:**
 ```bash
-PYTHONPATH=src venv/bin/python -m chickgut.main
+PYTHONPATH=src python -m chickgut.main
+```
+
+**Windows:**
+```cmd
+set PYTHONPATH=src
+python -m chickgut.main
 ```
 
 # Testing

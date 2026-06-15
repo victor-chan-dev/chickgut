@@ -24,12 +24,17 @@ classifiers = [
 
 # Replace the example dependencies below with the exact entries from your requirements.txt
 dependencies = [
-    "requests>=2.28",     # example; remove or replace with actual requirements
     "pandas",
     "numpy",
     "matplotlib",
     "scipy",
-    "openpyxl"
+    "openpyxl",
+    "jax",
+    "jaxlib",
+    "diffrax",
+    "equinox",
+    "jaxtyping",
+    "pymoo"
 ]
 
 # Dev/test tooling; replace or extend to match your dev requirements
