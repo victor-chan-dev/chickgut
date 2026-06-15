@@ -31,6 +31,10 @@ If you are on a brand new computer and have little to no experience running Pyth
    ```bash
    pip install -r requirements.txt
    ```
+   *Note for Mac Users*: To enable GPU acceleration on Apple Silicon (M1/M2/M3), also run:
+   ```bash
+   pip install jax-metal
+   ```
 
 ### Running the Interactive Simulation
 Once everything is installed (and while your `(venv)` is still active), you can run the program:
@@ -116,11 +120,19 @@ A single HindGIT simulation run took approximately **34 to 37 seconds**. The maj
 | **Ileum** | ~5 - 6s | Solving rapidly-digested protein equations (~5.4s) |
 
 ### New JAX Implementation
-A single HindGIT simulation run now takes approximately **37 seconds** using our JAX hybrid implementation. The primary bottleneck is **no longer ODE solving**, but memory allocation during Pandas DataFrame creation.
+A single HindGIT simulation run using JAX takes approximately **39 seconds** on the very first execution due to XLA graph compilation (analyzing the mathematical physics model). However, once compiled, the JAX runtime execution drops dramatically to **~6.0 seconds**.
 
-| Operations Phase | Duration (avg) | Key Bottleneck |
-| :--- | :--- | :--- |
-| **JAX ODE Solvers** | ~6s | `diffrax.diffeqsolve` evaluates mathematical physics models, heavily utilizing all CPU cores |
-| **DataFrame Construction** | ~28s | Extracting large JAX matrices into `pd.DataFrame` and `jax.vmap` calculation |
+### Autodiff Gradient Optimization vs PyMoo
 
-*Note: For large evolutionary batches using PyMoo, stripping the Pandas DataFrames directly out of the objective loop reduces execution time to roughly ~6.0 seconds per evaluation.*
+**The PyMoo Parallelization Limitation (9.5 Hours)**
+We originally expected to parallelize evaluations using PyMoo with 8 threads to reduce the 9.5 hour runtime to roughly ~1 hour. However, because JAX's `diffrax` engine relies on XLA (which inherently multi-threads *inside* a single ODE solve to perfectly saturate all physical CPU cores), launching 8 simultaneous PyMoo threads caused severe thread-contention. PyMoo optimizations must run sequentially, evaluating 6,000 generations over **~9.5 hours**.
+
+**The Autodiff Solution**
+By utilizing JAX `value_and_grad` alongside SciPy's L-BFGS-B optimizer, we bypass genetic algorithms altogether. Autodiff computes the exact mathematical gradient of the entire digestive tract simulation relative to our 3 variables (`k_absp`, `k_digestrate`, `Kp_endog_min`).
+
+| Optimization Method | Evaluation Count | Single Evaluation Time | Real-World Time |
+| :--- | :--- | :--- | :--- |
+| **PyMoo (Genetic Algorithm)** | ~6,000 | ~6.0s (compiled JAX) | **~9.5 hours** |
+| **SciPy + JAX Autodiff** | ~100 - 300 | ~6.5s (compiled JAX) | **~15 - 30 minutes** |
+
+*Note: The autodiff optimization implementation is available behind a feature gate (`--use-autodiff`). While much faster, it requires tuning the implicit ODE solver parameters (e.g. `Kvaerno5` step sizes) to prevent numerical instability (`NaN`/`inf` gradients) during backward passes.*

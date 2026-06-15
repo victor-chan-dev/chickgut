@@ -156,14 +156,14 @@ def run_simulation(ingr_name, constants, k_absp, k_digestrate, Kp_endog_min, t_e
     
     duodenum_instance, jejunum_instance, ileum_instance = HindGIT(
         ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog_min, 
-        result_fore, iDuo_g, BWeight_kgb, Kp_PVG_min, export_dataframes
+        result_fore.t, result_fore.y, iDuo_g, BWeight_kgb, Kp_PVG_min, export_dataframes
     )
     return duodenum_instance, jejunum_instance, ileum_instance, df_fore
 
 @time_it
-def HindGIT(ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog_min, result_fore, iDuo_g, BWeight_kgb, Kp_PVG_min, export_dataframes=True):
+def HindGIT(ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog_min, fore_t, fore_y, iDuo_g, BWeight_kgb, Kp_PVG_min, export_dataframes=True):
     # 1. creating duodenum, jejunum and ileum
-    duodenum_instance = Duodenum(t_span, iDuo_g, t_eval, result_fore, BWeight_kgb, Kp_PVG_min, constants, k_absp, k_digestrate, Kp_endog_min)
+    duodenum_instance = Duodenum(t_span, iDuo_g, t_eval, fore_t, fore_y, BWeight_kgb, Kp_PVG_min, constants, k_absp, k_digestrate, Kp_endog_min)
     jejunum_instance = Jejunum(t_span, t_eval, constants, BWeight_kgb, k_absp, k_digestrate, Kp_endog_min)
     ileum_instance = Ileum(t_span, t_eval, constants, BWeight_kgb, k_absp, k_digestrate, Kp_endog_min)
     
@@ -232,3 +232,108 @@ def HindGIT(ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog
         print("finished ileum")
     
     return duodenum_instance, jejunum_instance, ileum_instance
+
+def precompute_foregut(constants, t_eval, t_span):
+    # Body weight
+    BWeight_kgb = constants['birdBW_kg']
+    
+    feed_times = [0, 480, 720, 960, 1200, 1440]  
+    meal_num = len(feed_times)
+    feed_duration = 230.4/meal_num
+    bolus_feed_g = constants['FI_24h_gbird_onDM']/meal_num 
+    Kp_feed_intake_gmin = bolus_feed_g/feed_duration
+    Kp_meal_intake = 1/feed_duration 
+    
+    pellet_density = (0.726 - 0.363)/2
+    crop_volume = 67.35*BWeight_kgb
+    max_g_Crop = crop_volume*pellet_density
+
+    feed_intake_g = np.zeros(len(t_eval)) 
+    for t in feed_times:
+        for CP_intake_interval in range(int(t), int(t+feed_duration)):
+            FT_index = np.where(t_eval == CP_intake_interval)[0][0]
+            feed_intake_g[FT_index] = Kp_feed_intake_gmin
+    
+    df_Q_meal_CP_g = pd.DataFrame({'Time': t_eval, 'Q_meal_g': feed_intake_g})
+    meal_intake_Q_g = df_Q_meal_CP_g['Q_meal_g'].values 
+
+    y0_CPVG = [0.000001, 0.000001, 0.000001]
+    iDuo_g = [0.000001]
+    
+    Kp_Cr_min = 0.025   
+    Kp_PVG_min = 0.029  
+
+    def CPVG(t, y):
+        Qfeed_Cr_g, QCP_PVG_g, Qfeed_PVG_g = y
+        
+        index_meal_intake = min(np.searchsorted(df_Q_meal_CP_g['Time'], t), len(df_Q_meal_CP_g['Time']) - 1)
+        Q_meal_CP_g_at_t = meal_intake_Q_g[index_meal_intake]            
+        if Qfeed_Cr_g < max_g_Crop:            
+            P_meal_CP_gmin = Kp_meal_intake*(Q_meal_CP_g_at_t)
+        else:
+            P_meal_CP_gmin = 0.000000000001*(Kp_meal_intake*(Q_meal_CP_g_at_t))
+            
+        U_CP_CrPVG_gmin = Kp_Cr_min*(Qfeed_Cr_g)
+        dCrdt = P_meal_CP_gmin - U_CP_CrPVG_gmin
+
+        QCP_Cr_g = Qfeed_Cr_g*(constants['CP_diet_p']/100)
+        
+        if Qfeed_Cr_g < 7.0:
+            P_CP_PVG_gmin = Kp_Cr_min*(QCP_Cr_g)
+            P_feed_Cr = Qfeed_Cr_g*Kp_Cr_min
+        else:
+            P_CP_PVG_gmin = 0.0000000000001*(Kp_Cr_min*(QCP_Cr_g))
+            P_feed_Cr = 0.0000000000001*(Qfeed_Cr_g*Kp_Cr_min)
+            
+        U_CP_PVGDuo_UP_gmin = Kp_Cr_min*(QCP_PVG_g*constants['UP_Fr'])
+        U_CP_PVGDuo_SlP_gmin = Kp_Cr_min*(QCP_PVG_g*constants['SlP_Fr'])
+        U_CP_PVGDuo_RP_gmin = Kp_Cr_min*(QCP_PVG_g*constants['RP_Fr'])
+        U_feed_PVGDuo = Qfeed_PVG_g*Kp_PVG_min
+        
+        dPVGdt = P_CP_PVG_gmin - U_CP_PVGDuo_UP_gmin - U_CP_PVGDuo_SlP_gmin - U_CP_PVGDuo_RP_gmin
+        dPVG_feeddt = P_feed_Cr - U_feed_PVGDuo
+
+        return [dCrdt, dPVGdt, dPVG_feeddt]
+    
+    result_fore = solve_ivp(CPVG, t_span, y0=y0_CPVG, t_eval=t_eval, dense_output=True, method='Radau')
+    return result_fore, iDuo_g, BWeight_kgb, Kp_PVG_min
+
+def pure_sim_flux(params, t_eval, t_span, constants, fore_t, fore_y, iDuo_g, BWeight_kgb, Kp_PVG_min):
+    """
+    A pure JAX-compatible simulation that takes parameters and returns the final flux sum.
+    """
+    k_absp, k_digestrate, Kp_endog_min = params[0], params[1], params[2]
+    
+    duo = Duodenum(t_span, iDuo_g, t_eval, fore_t, fore_y, BWeight_kgb, Kp_PVG_min, constants, k_absp, k_digestrate, Kp_endog_min)
+    jej = Jejunum(t_span, t_eval, constants, BWeight_kgb, k_absp, k_digestrate, Kp_endog_min)
+    il = Ileum(t_span, t_eval, constants, BWeight_kgb, k_absp, k_digestrate, Kp_endog_min)
+    
+    duo.calculate_duo_prop()
+    jej.calculate_jej_prop()
+    il.calculate_Il_prop()
+    
+    duo.calculate_V(jej, il)
+    jej.calculate_V(duo, il)
+    il.calculate_V(duo, jej)
+    
+    duo.calculate_duo_endog()
+    jej.calculate_jej_endog()
+    il.calculate_Il_endog()
+    
+    duo.solving_Unode0()
+    duo.solving_duo_USl()
+    duo.solving_duo_R()
+    duo.solving_duo_feed()
+    
+    jej.Duo_results(duo)
+    jej.solving_jej_USl()
+    jej.solving_jej_R()
+    jej.solving_jej_feed()
+    
+    il.Jej_results(jej)
+    il.solving_il_USl()
+    il.solving_il_R()
+    il.solving_il_feed()
+    
+    sum_UI_flux, sum_SlI_flux, sum_RI_flux = il.get_flux_sums(limit=2001)
+    return sum_UI_flux + sum_SlI_flux + sum_RI_flux

@@ -6,14 +6,17 @@ import pandas as pd
 import multiprocessing
 from multiprocessing.pool import ThreadPool
 
-from pymoo.core.problem import ElementwiseProblem
+from pymoo.core.problem import Problem
 from pymoo.algorithms.soo.nonconvex.de import DE
 from pymoo.optimize import minimize
 from pymoo.core.callback import Callback
 
-from chickgut.simulation import run_simulation
+from chickgut.simulation import run_simulation, precompute_foregut, pure_sim_flux
+import jax
+import jax.numpy as jnp
+from scipy.optimize import minimize as scipy_minimize
 
-class ChickgutProblem(ElementwiseProblem):
+class ChickgutProblem(Problem):
     """
     This class defines our specific optimization problem for pymoo.
     It tells the optimizer how many parameters we have, what their limits are,
@@ -24,45 +27,48 @@ class ChickgutProblem(ElementwiseProblem):
         # We are trying to minimize 1 objective (n_obj=1), which is the Sum of Squared Errors.
         # xl is the lower limit (0 for all), and xu is the upper limit for our parameters.
         super().__init__(n_var=3, n_obj=1, n_ieq_constr=0, xl=np.array([0.0, 0.0, 0.0]), xu=np.array([100.0, 0.1, 0.1]), **kwargs)
-        self.t_eval = t_eval
+        self.t_eval = tuple(t_eval) # Convert to tuple for JAX static_argnames
         self.t_span = t_span
         self.ingr_name = ingr_name
         self.constants = constants
         self.protein_data = constants['target_v_sdis']
         
-    def _evaluate(self, x, out, *args, **kwargs):
-        # This function scores how "good" the optimizer's guess is.
-        # x contains the current guessed values for the 3 parameters.
-        k_absp, k_digestrate, Kp_endog_min = x
+        # Precompute foregut once per optimization run
+        print(f"[{ingr_name.upper()}] Precomputing foregut for PyMoo JAX execution...")
+        result_fore, self.iDuo_g, self.BWeight_kgb, self.Kp_PVG_min = precompute_foregut(constants, t_eval, t_span)
+        self.fore_t = jnp.array(result_fore.t)
+        self.fore_y = jnp.array(result_fore.y.T)
         
+    def _evaluate(self, x, out, *args, **kwargs):
         import datetime
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{now}] [Ingredient: {self.ingr_name.upper()}] Starting Evaluation: k_absp={k_absp:.4f}, k_dig={k_digestrate:.4f}, Kp_endog={Kp_endog_min:.4f}")
+        pop_size = x.shape[0]
+        print(f"[{now}] [Ingredient: {self.ingr_name.upper()}] Evaluating population of {pop_size} via JAX vmap...")
         
-        try:
-            # 1. Run the digestive simulation with these guessed parameters.
-            # export_dataframes=False skips the heavy spreadsheet generation, making the loop 4x-5x faster!
-            duodenum_instance, jejunum_instance, ileum_instance, df_fore = run_simulation(
-                self.ingr_name, self.constants, k_absp, k_digestrate, Kp_endog_min, self.t_eval, self.t_span, export_dataframes=False
+        import functools
+        @functools.partial(jax.jit, static_argnames=['t_eval', 't_span', 'constants_tuple', 'iDuo_g', 'BWeight_kgb', 'Kp_PVG_min'])
+        def batched_sim(params_batch, t_eval, t_span, constants_tuple, fore_t, fore_y, iDuo_g, BWeight_kgb, Kp_PVG_min):
+            constants_dict = dict(constants_tuple)
+            return jax.vmap(pure_sim_flux, in_axes=(0, None, None, None, None, None, None, None, None))(
+                params_batch, jnp.array(t_eval), t_span, constants_dict, fore_t, fore_y, list(iDuo_g), BWeight_kgb, Kp_PVG_min
             )
             
-            # 2. Collect the total amount of unabsorbed protein flowing out of the ileum
-            sum_UI_flux, sum_SlI_flux, sum_RI_flux = ileum_instance.get_flux_sums(limit=2001)
-            sum_flux_total = sum_RI_flux + sum_UI_flux + sum_SlI_flux 
+        try:
+            flux_totals = batched_sim(
+                jnp.array(x), self.t_eval, self.t_span, tuple(self.constants.items()), 
+                self.fore_t, self.fore_y, tuple(self.iDuo_g), self.BWeight_kgb, self.Kp_PVG_min
+            )
             
-            # 3. Calculate the predicted Apparent Digestibility (%)
-            # This is the percentage of the original feed protein that successfully absorbed
-            pred_protein = (1 - (sum_flux_total / self.constants['FI_24h_gbird'])) * 100
+            pred_protein = (1 - (flux_totals / self.constants['FI_24h_gbird'])) * 100
             
-            # 4. Calculate the error between our prediction and the real-world lab data
-            # The optimizer will try to make this number (SSE_protein) as close to 0 as possible.
-            SSE_protein = np.sum((pred_protein - self.protein_data) ** 2)
-            out["F"] = SSE_protein
+            # SSE calculation broadcasted over population
+            SSE_protein = jnp.sum((pred_protein[:, None] - self.protein_data) ** 2, axis=1)
+            
+            out["F"] = np.array(SSE_protein).reshape(-1, 1)
             
         except Exception as e:
-            # If the ODE solver crashes (e.g., the guessed parameters caused extreme stiffness),
-            # we return a massive penalty error (1e10). This teaches the optimizer to avoid these parameters.
-            out["F"] = 1e10
+            print("Vmap execution failed:", e)
+            out["F"] = np.full((pop_size, 1), 1e10)
 
 class CheckpointCallback(Callback):
     """
@@ -129,10 +135,9 @@ def optimize_params(t_eval, t_span, ingr_name, constants, output_dir=".", n_thre
     
     checkpoint_path = os.path.join(output_dir, "checkpoint.pkl")
     
-    # We use a ThreadPool instead of a ProcessPool because JAX is highly optimized.
-    # Normally, Python threads block each other (GIL), but JAX skips this lock, 
-    # letting us run parallel ODEs blazing fast without eating up all your RAM.
-    pool = ThreadPool(n_threads)
+    # We don't need a ThreadPool anymore because JAX vmap naturally parallelizes
+    # across the CPU/GPU with vectorized instructions!
+    # pool = ThreadPool(n_threads)
     
     problem = ChickgutProblem(
         t_eval=t_eval, 
@@ -172,7 +177,7 @@ def optimize_params(t_eval, t_span, ingr_name, constants, output_dir=".", n_thre
         copy_termination=False
     )
     
-    pool.close()
+    # pool.close()
     
     # Extract the best result
     k_absp_opt = res.X[0]
@@ -205,3 +210,63 @@ def optimize_params(t_eval, t_span, ingr_name, constants, output_dir=".", n_thre
         print(f"Refinement simulation failed: {e}")
         return None
 
+def optimize_params_autodiff(t_eval, t_span, ingr_name, constants, output_dir="."):
+    """
+    Fits the model parameters using JAX Autodiff and Scipy L-BFGS-B gradient descent.
+    """
+    print(f"\nStarting AUTODIFF gradient optimization for {ingr_name}...")
+    
+    result_fore, iDuo_g, BWeight_kgb, Kp_PVG_min = precompute_foregut(constants, t_eval, t_span)
+    fore_t = jnp.array(result_fore.t)
+    fore_y = jnp.array(result_fore.y.T)
+    
+    target_protein = constants['target_v_sdis']
+    FI_24h_gbird = constants['FI_24h_gbird']
+    
+    import functools
+    @functools.partial(jax.jit, static_argnames=['t_eval', 't_span', 'constants_tuple', 'iDuo_g', 'BWeight_kgb', 'Kp_PVG_min'])
+    def loss_fn(params, t_eval, t_span, constants_tuple, fore_t, fore_y, iDuo_g, BWeight_kgb, Kp_PVG_min):
+        constants_dict = dict(constants_tuple)
+        sum_flux_total = pure_sim_flux(params, jnp.array(t_eval), t_span, constants_dict, fore_t, fore_y, list(iDuo_g), BWeight_kgb, Kp_PVG_min)
+        pred_protein = (1 - (sum_flux_total / FI_24h_gbird)) * 100
+        return jnp.sum((pred_protein - target_protein) ** 2)
+        
+    value_and_grad_fn = jax.jit(jax.value_and_grad(loss_fn, argnums=0), static_argnames=['t_eval', 't_span', 'constants_tuple', 'iDuo_g', 'BWeight_kgb', 'Kp_PVG_min'])
+    
+    def scipy_objective(x):
+        val, grad = value_and_grad_fn(
+            jnp.array(x), tuple(t_eval), t_span, tuple(constants.items()), fore_t, fore_y, tuple(iDuo_g), BWeight_kgb, Kp_PVG_min
+        )
+        print(f"Eval X: k_absp={x[0]:.4f}, k_dig={x[1]:.4f}, Kp_endog={x[2]:.4f} | Loss: {val:.4f}")
+        return float(val), np.array(grad, dtype=np.float64)
+        
+    # Standard initial guess (industry standard fallback)
+    x0 = np.array([63.7867, 0.0878, 0.0142])
+    bounds = [(0.001, 100.0), (0.001, 0.1), (0.001, 0.1)]
+    
+    res = scipy_minimize(scipy_objective, x0, method='L-BFGS-B', jac=True, bounds=bounds, options={'disp': True})
+    
+    print("\nAutodiff Optimization Complete!")
+    print(f"best K_absp_opt: {res.x[0]}")
+    print(f"best K_digestrate_opt: {res.x[1]}")
+    print(f"best K_endog_opt: {res.x[2]}")
+    
+    print("\nRefining best result...")
+    try:
+        duodenum_2, jejunum_2, ileum_2, df_fore = run_simulation(
+            ingr_name, constants, res.x[0], res.x[1], res.x[2], t_eval, t_span, export_dataframes=True
+        )
+        
+        opt_results = [[res.x[0], res.x[1], res.x[2]]]
+        column_names = [f"k_absp_{ingr_name}", f"k_digestrate_{ingr_name}", f"k_endog_{ingr_name}"]
+        df_opt_results = pd.DataFrame(opt_results, columns=column_names)
+        
+        os.makedirs(output_dir, exist_ok=True)
+        results_file = os.path.join(output_dir, "autodiff_results.xlsx")
+        df_opt_results.to_excel(results_file, index=False)
+        print(f"All results saved to '{results_file}'")
+        
+        return (res.x[0], res.x[1], res.x[2], res.x, duodenum_2, jejunum_2, ileum_2)
+    except Exception as e:
+        print(f"Refinement simulation failed: {e}")
+        return None

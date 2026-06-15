@@ -243,11 +243,8 @@ class Jejunum():
     @time_it
     def solving_jej_USl(self):
         # Diffrax .ys has shape (num_time_steps, num_variables)
-        self.init_Jej_CPu[0] = float(self.UDexit_SS.ys[-1, -1]) / self.Jej_single_node_V
-        self.init_Jej_CPsl[0] = float(self.SlDexit_SS.ys[-1, -1]) / self.Jej_single_node_V
-
-        y0_u = jnp.array(self.init_Jej_CPu)
-        y0_sl = jnp.array(self.init_Jej_CPsl)
+        y0_u = jnp.zeros(len(self.init_Jej_CPu)).at[0].set(self.UDexit_SS.ys[-1, -1] / self.Jej_single_node_V)
+        y0_sl = jnp.zeros(len(self.init_Jej_CPsl)).at[0].set(self.SlDexit_SS.ys[-1, -1] / self.Jej_single_node_V)
         
         args_u = (self.UDexit_SS, self.VF_CPu, jnp.array(self.JejV_cm3), self.Kp_Jej_min, self.Duo_single_node_V, self.P_CPe_Jej_gmincm3)
         args_sl = (self.SlDexit_SS, self.VF, jnp.array(self.JejV_cm3), self.Kp_Duo_min, self.Jej_single_node_V, self.k_digestrate)
@@ -287,12 +284,12 @@ class Jejunum():
         v_compute = jax.vmap(compute_metrics)
         dUJdt_all, flux_all = v_compute(self.UJexit_SS.ts, jnp.maximum(self.UJexit_SS.ys, 0.0))
         
-        self.df_UP_j = pd.DataFrame({
-            't': np.array(self.UJexit_SS.ts),
-            'dUJdt': np.array(dUJdt_all[:, -1]),
-            'flux_CPu_Jej_psg': np.array(flux_all),
-            'CPu_jej': np.array(jnp.maximum(self.UJexit_SS.ys[:, -1], 0.0))
-        })
+        self.df_UP_j = {
+            't': self.UJexit_SS.ts,
+            'dUJdt': dUJdt_all[:, -1],
+            'flux_CPu_Jej_psg': flux_all,
+            'CPu_jej': jnp.maximum(self.UJexit_SS.ys[:, -1], 0.0)
+        }
         return self.df_UP_j, None
 
     def flatten_result_jej_CPsl(self):
@@ -305,27 +302,24 @@ class Jejunum():
         v_compute = jax.vmap(compute_metrics)
         dSlJdt_all, flux_all = v_compute(self.SlJexit_SS.ts, jnp.maximum(self.SlJexit_SS.ys, 0.0))
         
-        self.df_SlP_j = pd.DataFrame({
-            't': np.array(self.SlJexit_SS.ts),
-            'dSlJdt': np.array(dSlJdt_all[:, -1]),
-            'flux_CPsl_Jej_psg_dis': np.array(flux_all),
-            'CPsl_jej': np.array(jnp.maximum(self.SlJexit_SS.ys[:, -1], 0.0))
-        })
+        self.df_SlP_j = {
+            't': self.SlJexit_SS.ts,
+            'dSlJdt': dSlJdt_all[:, -1],
+            'flux_CPsl_Jej_psg_dis': flux_all,
+            'CPsl_jej': jnp.maximum(self.SlJexit_SS.ys[:, -1], 0.0)
+        }
         return self.df_SlP_j, None
 
+    @time_it
     def SlP_for_RP_j(self):
         self.flatten_result_jej_CPsl()
-        df_Q_CPsl_Jej = self.df_SlP_j[['t', 'CPsl_jej']] 
-        df_Q_CPsl_Jej.reset_index(drop=True, inplace=True) 
-        Jej_CPsl = df_Q_CPsl_Jej['CPsl_jej'].values 
-        return df_Q_CPsl_Jej, Jej_CPsl
+        Jej_CPsl_Q = self.df_SlP_j['CPsl_jej']
+        return None, Jej_CPsl_Q
     
     @time_it
     def solving_jej_R(self):
         self.df_Q_CPsl_Jej, self.Jej_CPsl = self.SlP_for_RP_j()
-        self.init_Jej_CPr[0] = float(self.RDexit_SS.ys[-1, -1]) / self.Jej_single_node_V
-            
-        y0_r = jnp.array(self.init_Jej_CPr)
+        y0_r = jnp.zeros(len(self.init_Jej_CPr)).at[0].set(self.RDexit_SS.ys[-1, -1] / self.Jej_single_node_V)
         args_r = (self.RDexit_SS, self.SlJexit_SS, self.VF, jnp.array(self.JejV_cm3), self.Kp_Duo_min, self.Duo_single_node_V, self.Jej_single_node_V, self.k_absp, self.k_digestrate)
         
         solver = diffrax.Kvaerno5()
@@ -349,12 +343,12 @@ class Jejunum():
         v_compute = jax.vmap(compute_metrics)
         dRJdt_all, flux_all = v_compute(self.RJexit_SS.ts, jnp.maximum(self.RJexit_SS.ys, 0.0))
         
-        self.df_RP_j = pd.DataFrame({
-            't': np.array(self.RJexit_SS.ts),
-            'dRJdt': np.array(dRJdt_all[:, -1]),
-            'flux_CPr_Jej_psg_dis': np.array(flux_all),
-            'CPr_jej': np.array(jnp.maximum(self.RJexit_SS.ys[:, -1], 0.0))
-        })
+        self.df_RP_j = {
+            't': self.RJexit_SS.ts,
+            'dRJdt': dRJdt_all[:, -1],
+            'flux_CPr_Jej_psg_dis': flux_all,
+            'CPr_jej': jnp.maximum(self.RJexit_SS.ys[:, -1], 0.0)
+        }
         return self.df_RP_j, None
     
     @time_it
@@ -384,12 +378,12 @@ class Jejunum():
         v_compute = jax.vmap(compute_metrics)
         dfeedjejdt_all, flux_all, Q_all = v_compute(self.result_feed_jej.ts, jnp.maximum(self.result_feed_jej.ys, 0.0))
         
-        self.df_feed_j = pd.DataFrame({
-            't': np.array(self.result_feed_jej.ts),
-            'dfeedjejdt': np.array(dfeedjejdt_all),
-            'flux_feed_JejIl': np.array(flux_all),
-            'Qfeed_jej': np.array(jnp.maximum(self.result_feed_jej.ys[:, 0], 0.0))
-        })
+        self.df_feed_j = {
+            't': self.result_feed_jej.ts,
+            'dfeedjejdt': dfeedjejdt_all,
+            'flux_feed_JejIl': flux_all,
+            'Qfeed_jej': jnp.maximum(self.result_feed_jej.ys[:, 0], 0.0)
+        }
         return self.df_feed_j, None 
 
     def plot_jej(self):

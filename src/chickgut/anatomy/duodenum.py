@@ -162,12 +162,13 @@ def _feed_duo_metrics(t, y, args):
 
 class Duodenum():
         
-    def __init__(self, t_span, iDuo_g, t_eval, result_fore, BWeight_kgb, Kp_PVG_min, constants, k_absp, k_digestrate, Kp_endog_min):
+    def __init__(self, t_span, init_Duo_CPu, t_eval, fore_t, fore_y, BWeight_kgb, Kp_PVG_min, constants, k_absp, k_digestrate, Kp_endog_min):
         self.name = "duodenum"
         self.t_span = t_span
         self.t_eval = t_eval
-
-        self.iDuo_g = iDuo_g
+        self.fore_t = fore_t
+        self.fore_y = fore_y
+        self.iDuo_g = init_Duo_CPu
         self.init_Duo_CPu = None
         self.init_Duo_CPsl = None
         self.init_Duo_CPr = None
@@ -185,7 +186,6 @@ class Duodenum():
         self.total_discretize = None
         self.total_node_num = None
 
-        self.result_fore = result_fore
         self.Kp_PVG_min = Kp_PVG_min
         self.constants = constants
         self.BWeight_kgb = BWeight_kgb
@@ -241,8 +241,8 @@ class Duodenum():
 
     def solving_Unode0(self):
         # Prepare JAX arrays for foregut results
-        fore_t = jnp.array(self.result_fore.t)
-        fore_y = jnp.array(self.result_fore.y.T)
+        fore_t = self.fore_t
+        fore_y = self.fore_y
         
         args_u = (fore_t, fore_y, self.constants['UP_Fr'], self.Kp_PVG_min, self.Kp_Duo_min)
         args_sl = (fore_t, fore_y, self.constants['SlP_Fr'], self.Kp_PVG_min, self.Kp_Duo_min)
@@ -270,11 +270,8 @@ class Duodenum():
 
     @time_it
     def solving_duo_USl(self):
-        self.init_Duo_CPu[0] = float(self.result_UDnode0.ys[-1, 0])
-        self.init_Duo_CPsl[0] = float(self.result_SlDnode0.ys[-1, 0])
-        
-        y0_u = jnp.array(self.init_Duo_CPu)
-        y0_sl = jnp.array(self.init_Duo_CPsl)
+        y0_u = jnp.zeros(len(self.init_Duo_CPu)).at[0].set(self.result_UDnode0.ys[-1, 0])
+        y0_sl = jnp.zeros(len(self.init_Duo_CPsl)).at[0].set(self.result_SlDnode0.ys[-1, 0])
         
         args_u = (self.result_UDnode0, self.VF, jnp.array(self.DuoV_cm3), self.Kp_Duo_min, self.Duo_single_node_V, self.P_CPe_gmincm3)
         args_sl = (self.result_SlDnode0, self.VF, jnp.array(self.DuoV_cm3), self.Kp_Duo_min, self.Duo_single_node_V, self.k_digestrate)
@@ -315,13 +312,13 @@ class Duodenum():
         v_compute = jax.vmap(compute_metrics)
         dUDdt_all, flux_all, C_all = v_compute(self.UDexit_SS.ts, jnp.maximum(self.UDexit_SS.ys, 0.0))
         
-        self.df_UP_d = pd.DataFrame({
-            't': np.array(self.UDexit_SS.ts),
-            'dUDdt': np.array(dUDdt_all[:, -1]),
-            'flux_CPu_DuoJej': np.array(flux_all),
-            'Conc_CPu_Duolast': np.array(C_all),
-            'QCPu_duo': np.array(jnp.maximum(self.UDexit_SS.ys[:, -1], 0.0))
-        })
+        self.df_UP_d = {
+            't': self.UDexit_SS.ts,
+            'dUDdt': dUDdt_all[:, -1],
+            'flux_CPu_DuoJej': flux_all,
+            'Conc_CPu_Duolast': C_all,
+            'QCPu_duo': jnp.maximum(self.UDexit_SS.ys[:, -1], 0.0)
+        }
         return self.df_UP_d, None
     
     def flatten_result_duo_CPsl(self):
@@ -334,30 +331,26 @@ class Duodenum():
         v_compute = jax.vmap(compute_metrics)
         dSlDdt_all, flux_all, C_all = v_compute(self.SlDexit_SS.ts, jnp.maximum(self.SlDexit_SS.ys, 0.0))
         
-        self.df_SlP_d = pd.DataFrame({
-            't': np.array(self.SlDexit_SS.ts),
-            'dDSldt': np.array(dSlDdt_all[:, -1]),
-            'flux_CPsl_DuoJej': np.array(flux_all),
-            'Conc_CPsl_Duolast': np.array(C_all),
-            'QCPsl_duo': np.array(jnp.maximum(self.SlDexit_SS.ys[:, -1], 0.0))
-        })
+        self.df_SlP_d = {
+            't': self.SlDexit_SS.ts,
+            'dDSldt': dSlDdt_all[:, -1],
+            'flux_CPsl_DuoJej': flux_all,
+            'Conc_CPsl_Duolast': C_all,
+            'QCPsl_duo': jnp.maximum(self.SlDexit_SS.ys[:, -1], 0.0)
+        }
         return self.df_SlP_d, None
 
     @time_it
     def SlP_for_RP_d(self):
         self.flatten_result_duo_CPsl()
-        # Not strictly needed for diffrax anymore, but returning just in case anything else uses it
-        df_Q_CPsl_Duo = self.df_SlP_d[['t', 'QCPsl_duo']] 
-        df_Q_CPsl_Duo.reset_index(drop=True, inplace=True) 
-        Duo_CPsl_Q = df_Q_CPsl_Duo['QCPsl_duo'].values 
-        return df_Q_CPsl_Duo, Duo_CPsl_Q
+        Duo_CPsl_Q = self.df_SlP_d['QCPsl_duo']
+        return None, Duo_CPsl_Q
 
     @time_it
     def solving_duo_R(self):
         self.df_Q_CPsl_Duo, self.Duo_CPsl_Q = self.SlP_for_RP_d()
 
-        self.init_Duo_CPr[0] = float(self.result_RDnode0.ys[-1, 0])
-        y0_r = jnp.array(self.init_Duo_CPr)
+        y0_r = jnp.zeros(len(self.init_Duo_CPr)).at[0].set(self.result_RDnode0.ys[-1, 0])
         
         args_r = (self.result_RDnode0, self.SlDexit_SS, self.VF, jnp.array(self.DuoV_cm3), self.Kp_Duo_min, self.Duo_single_node_V, self.k_absp, self.k_digestrate)
         
@@ -383,18 +376,18 @@ class Duodenum():
         v_compute = jax.vmap(compute_metrics)
         dRDdt_all, flux_all, C_all = v_compute(self.RDexit_SS.ts, jnp.maximum(self.RDexit_SS.ys, 0.0))
         
-        self.df_RP_d = pd.DataFrame({
-            't': np.array(self.RDexit_SS.ts),
-            'dRDdt': np.array(dRDdt_all[:, -1]),
-            'flux_CPr_DuoJej': np.array(flux_all),
-            'C_CPr__Duolast_gcm3': np.array(C_all),
-            'QCPr_duo': np.array(jnp.maximum(self.RDexit_SS.ys[:, -1], 0.0))
-        })
+        self.df_RP_d = {
+            't': self.RDexit_SS.ts,
+            'dRDdt': dRDdt_all[:, -1],
+            'flux_CPr_DuoJej': flux_all,
+            'C_CPr__Duolast_gcm3': C_all,
+            'QCPr_duo': jnp.maximum(self.RDexit_SS.ys[:, -1], 0.0)
+        }
         return self.df_RP_d, None
 
     def solving_duo_feed(self):
-        fore_t = jnp.array(self.result_fore.t)
-        fore_y = jnp.array(self.result_fore.y.T)
+        fore_t = self.fore_t
+        fore_y = self.fore_y
         args_feed = (fore_t, fore_y, self.Kp_PVG_min, self.Kp_Duo_min)
         
         solver = diffrax.Kvaerno5()  
@@ -410,8 +403,8 @@ class Duodenum():
         )
     
     def flatten_result_duo_feed(self):
-        fore_t = jnp.array(self.result_fore.t)
-        fore_y = jnp.array(self.result_fore.y.T)
+        fore_t = self.fore_t
+        fore_y = self.fore_y
         args_feed = (fore_t, fore_y, self.Kp_PVG_min, self.Kp_Duo_min)
         
         @jax.jit
@@ -421,12 +414,12 @@ class Duodenum():
         v_compute = jax.vmap(compute_metrics)
         dfeedduodt_all, flux_all, Q_all = v_compute(self.result_feed_duo.ts, jnp.maximum(self.result_feed_duo.ys, 0.0))
         
-        self.df_feed_d = pd.DataFrame({
-            't': np.array(self.result_feed_duo.ts),
-            'dfeedduodt': np.array(dfeedduodt_all),
-            'flux_feed_DuoJej': np.array(flux_all),
-            'Qfeed_duo': np.array(jnp.maximum(self.result_feed_duo.ys[:, 0], 0.0))
-        })
+        self.df_feed_d = {
+            't': self.result_feed_duo.ts,
+            'dfeedduodt': dfeedduodt_all,
+            'flux_feed_DuoJej': flux_all,
+            'Qfeed_duo': jnp.maximum(self.result_feed_duo.ys[:, 0], 0.0)
+        }
         return self.df_feed_d, None 
 
 def plot_duo(self):

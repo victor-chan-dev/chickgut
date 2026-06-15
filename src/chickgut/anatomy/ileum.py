@@ -235,11 +235,8 @@ class Ileum():
 
     @time_it
     def solving_il_USl(self):
-        self.init_Il_CPu[0] = float(self.UJexit_SS.ys[-1, -1]) / self.Il_single_node_V
-        self.init_Il_CPsl[0] = float(self.SlJexit_SS.ys[-1, -1]) / self.Il_single_node_V
-        
-        y0_u = jnp.array(self.init_Il_CPu)
-        y0_sl = jnp.array(self.init_Il_CPsl)
+        y0_u = jnp.zeros(len(self.init_Il_CPu)).at[0].set(self.UJexit_SS.ys[-1, -1] / self.Il_single_node_V)
+        y0_sl = jnp.zeros(len(self.init_Il_CPsl)).at[0].set(self.SlJexit_SS.ys[-1, -1] / self.Il_single_node_V)
         
         args_u = (self.UJexit_SS, self.VF_Il_CPu, jnp.array(self.IlV_cm3), self.Kp_Il_min, self.CP_jej_lastnode_vol_cm3, self.P_CPe_Il_gmincm3)
         args_sl = (self.SlJexit_SS, self.VF, jnp.array(self.IlV_cm3), self.Kp_Jej_min, self.Il_single_node_V, self.CP_jej_lastnode_vol_cm3, self.k_digestrate)
@@ -270,12 +267,12 @@ class Ileum():
         v_compute = jax.vmap(compute_metrics)
         dUIdt_all, flux_all = v_compute(self.UIexit_SS.ts, self.UIexit_SS.ys)
         
-        self.df_UP_i = pd.DataFrame({
-            't': np.array(self.UIexit_SS.ts),
-            'dUIdt': np.array(dUIdt_all[:, -1]),
-            'flux_CPu_Ileum_psg': np.array(flux_all),
-            'CPu_il': np.array(self.UIexit_SS.ys[:, -1])
-        })
+        self.df_UP_i = {
+            't': self.UIexit_SS.ts,
+            'dUIdt': dUIdt_all[:, -1],
+            'flux_CPu_Ileum_psg': flux_all,
+            'CPu_il': self.UIexit_SS.ys[:, -1]
+        }
         return self.df_UP_i, None
     
     def flatten_result_il_CPsl(self):
@@ -288,27 +285,24 @@ class Ileum():
         v_compute = jax.vmap(compute_metrics)
         dSlIdt_all, flux_all = v_compute(self.SlIexit_SS.ts, self.SlIexit_SS.ys)
         
-        self.df_SlP_i = pd.DataFrame({
-            't': np.array(self.SlIexit_SS.ts),
-            'dSlIdt': np.array(dSlIdt_all[:, -1]),
-            'flux_CPsl_Ileum_psg_dis': np.array(flux_all),
-            'CPsl_il': np.array(self.SlIexit_SS.ys[:, -1])
-        })
+        self.df_SlP_i = {
+            't': self.SlIexit_SS.ts,
+            'dSlIdt': dSlIdt_all[:, -1],
+            'flux_CPsl_Ileum_psg_dis': flux_all,
+            'CPsl_il': self.SlIexit_SS.ys[:, -1]
+        }
         return self.df_SlP_i, None
 
+    @time_it
     def SlP_for_RP_i(self):
         self.flatten_result_il_CPsl()
-        df_Q_CPsl_Il = self.df_SlP_i[['t', 'CPsl_il']] 
-        df_Q_CPsl_Il.reset_index(drop=True, inplace=True) 
-        Il_CPsl = df_Q_CPsl_Il['CPsl_il'].values  
-        return df_Q_CPsl_Il, Il_CPsl
+        Il_CPsl_Q = self.df_SlP_i['CPsl_il']
+        return None, Il_CPsl_Q
     
     @time_it
     def solving_il_R(self):
 
-        self.init_Il_CPr[0] = float(self.RJexit_SS.ys[-1, -1]) / self.Il_single_node_V
-            
-        y0_r = jnp.array(self.init_Il_CPr)
+        y0_r = jnp.zeros(len(self.init_Il_CPr)).at[0].set(self.RJexit_SS.ys[-1, -1] / self.Il_single_node_V)
         args_r = (self.RJexit_SS, self.SlIexit_SS, self.VF, jnp.array(self.IlV_cm3), self.Kp_Jej_min, self.Il_single_node_V, self.k_absp, self.k_digestrate)
         
         solver = diffrax.Tsit5()
@@ -332,12 +326,12 @@ class Ileum():
         v_compute = jax.vmap(compute_metrics)
         dRIdt_all, flux_all = v_compute(self.RIexit_SS.ts, self.RIexit_SS.ys)
         
-        self.df_RP_i = pd.DataFrame({
-            't': np.array(self.RIexit_SS.ts),
-            'dRIdt': np.array(dRIdt_all[:, -1]),
-            'flux_CPr_Ileum_psg_dis': np.array(flux_all),
-            'CPr_il': np.array(self.RIexit_SS.ys[:, -1])
-        })
+        self.df_RP_i = {
+            't': self.RIexit_SS.ts,
+            'dRIdt': dRIdt_all[:, -1],
+            'flux_CPr_Ileum_psg_dis': flux_all,
+            'CPr_il': self.RIexit_SS.ys[:, -1]
+        }
         return self.df_RP_i, None
     
     @time_it
@@ -367,12 +361,12 @@ class Ileum():
         v_compute = jax.vmap(compute_metrics)
         dfeedildt_all, flux_all, Q_all = v_compute(self.result_feed_il.ts, self.result_feed_il.ys)
         
-        self.df_feed_i = pd.DataFrame({
-            't': np.array(self.result_feed_il.ts),
-            'dfeedildt': np.array(dfeedildt_all),
-            'flux_feed_IlCo': np.array(flux_all),
-            'Qfeed_il': np.array(self.result_feed_il.ys[:, 0])
-        })
+        self.df_feed_i = {
+            't': self.result_feed_il.ts,
+            'dfeedildt': dfeedildt_all,
+            'flux_feed_IlCo': flux_all,
+            'Qfeed_il': self.result_feed_il.ys[:, 0]
+        }
         return self.df_feed_i, None 
 
     def get_flux_sums(self, limit=2001):

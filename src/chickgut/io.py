@@ -49,20 +49,35 @@ def plot_git_results(df_fore, image_dir="images"):
     plt.savefig(os.path.join(image_dir, 'B-protein-over-time-proventriculus_gizzard_flux.png'))
 
 def export_duojejil_results(duodenum_instance, jejunum_instance, ileum_instance, output_dir="Python_VSCode_Files"):
-    """
-    Exports the simulation results for Duodenum, Jejunum, and Ileum 
-    to Excel spreadsheets in the specified output directory.
-    """
+    print(f"\n-> Exporting complete results to '{output_dir}/' ...")
+    
+    import pandas as pd
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Pack up the results
+    results = [
+        ("Duo_UD", pd.DataFrame(duodenum_instance.df_UP_d)),
+        ("Duo_SlD", pd.DataFrame(duodenum_instance.df_SlP_d)),
+        ("Duo_RD", pd.DataFrame(duodenum_instance.df_RP_d)),
+        ("Duo_Feed", pd.DataFrame(duodenum_instance.df_feed_d)),
+        ("Jej_UD", pd.DataFrame(jejunum_instance.df_UP_j)),
+        ("Jej_SlD", pd.DataFrame(jejunum_instance.df_SlP_j)),
+        ("Jej_RD", pd.DataFrame(jejunum_instance.df_RP_j)),
+        ("Jej_Feed", pd.DataFrame(jejunum_instance.df_feed_j)),
+        ("Il_UD", pd.DataFrame(ileum_instance.df_UP_i)),
+        ("Il_SlD", pd.DataFrame(ileum_instance.df_SlP_i)),
+        ("Il_RD", pd.DataFrame(ileum_instance.df_RP_i)),
+        ("Il_Feed", pd.DataFrame(ileum_instance.df_feed_i)),
+    ]
 
     def export_duo():
         UDexit_SS = duodenum_instance.UDexit_SS
         SlDexit_SS = duodenum_instance.SlDexit_SS
         RDexit_SS = duodenum_instance.RDexit_SS
 
-        df_UP_d = duodenum_instance.df_UP_d
-        df_SlP_d = duodenum_instance.df_SlP_d
-        df_RP_d = duodenum_instance.df_RP_d
+        df_UP_d = pd.DataFrame(duodenum_instance.df_UP_d)
+        df_SlP_d = pd.DataFrame(duodenum_instance.df_SlP_d)
+        df_RP_d = pd.DataFrame(duodenum_instance.df_RP_d)
         
         df_UD = pd.DataFrame(UDexit_SS.ys, columns=[f'Node_{i}' for i in range(UDexit_SS.ys.shape[1])])
         df_UD['Time'] = UDexit_SS.ts
@@ -89,9 +104,9 @@ def export_duojejil_results(duodenum_instance, jejunum_instance, ileum_instance,
         SlJexit_SS = jejunum_instance.SlJexit_SS
         RJexit_SS = jejunum_instance.RJexit_SS
 
-        df_UP_j = jejunum_instance.df_UP_j
-        df_SlP_j = jejunum_instance.df_SlP_j
-        df_RP_j = jejunum_instance.df_RP_j
+        df_UP_j = pd.DataFrame(jejunum_instance.df_UP_j)
+        df_SlP_j = pd.DataFrame(jejunum_instance.df_SlP_j)
+        df_RP_j = pd.DataFrame(jejunum_instance.df_RP_j)
         
         df_UJ = pd.DataFrame(UJexit_SS.ys, columns=[f'Node_{i}' for i in range(UJexit_SS.ys.shape[1])])
         df_UJ['Time'] = UJexit_SS.ts
@@ -118,9 +133,9 @@ def export_duojejil_results(duodenum_instance, jejunum_instance, ileum_instance,
         SlIexit_SS = ileum_instance.SlIexit_SS
         RIexit_SS = ileum_instance.RIexit_SS
 
-        df_UP_i = ileum_instance.df_UP_i
-        df_SlP_i = ileum_instance.df_SlP_i
-        df_RP_i = ileum_instance.df_RP_i
+        df_UP_i = pd.DataFrame(ileum_instance.df_UP_i)
+        df_SlP_i = pd.DataFrame(ileum_instance.df_SlP_i)
+        df_RP_i = pd.DataFrame(ileum_instance.df_RP_i)
         
         df_UI = pd.DataFrame(UIexit_SS.ys, columns=[f'Node_{i}' for i in range(UIexit_SS.ys.shape[1])])
         df_UI['Time'] = UIexit_SS.ts
