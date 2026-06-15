@@ -120,7 +120,7 @@ Finding the exact biological digestion parameters ($k_{absp}$, $k_{dig}$, $K_{en
 > **ELI5: Why is the new method better?**
 > Imagine you have a giant padlock with 3 dials (our 3 biological parameters), and you need to find the exact combination that unlocks it.
 > 
-> **The Old Way (PyMoo Genetic Algorithm):** You invite 40 people to guess random combinations all at once. Anyone who gets close to the right answer gets to stay, and they "breed" to make slightly better random guesses. It's incredibly reliable because you search everywhere at once, but you end up having to test **6,000 different combinations** before you finally stumble upon the exact lock code.
+> **The Old Way (PyMoo Genetic Algorithm):** You invite 40 people to guess random combinations all at once. Anyone who gets close to the right answer gets to stay, and they combine their guesses to make slightly better ones. It's incredibly reliable because you search everywhere at once, but you end up having to test **6,000 different combinations** before you finally stumble upon the exact lock code.
 > 
 > **The New Way (Fast-JIT Directional Search):** Instead of guessing randomly, you put a stethoscope up to the lock. Every time you turn a dial just a tiny bit, you mathematically listen to hear if the "click" gets louder or quieter. The algorithm mathematically calculates exactly which direction to turn the dials to get closer to the right answer. Because it "listens" to the math, it only needs to test **~300 combinations** instead of 6,000, bringing the time down from 9.5 hours to 15 minutes!
 
