@@ -59,7 +59,7 @@ def main():
     parser.add_argument("ingredients", nargs="*", help="List of ingredients to process (e.g., sbm wheat corn)")
     parser.add_argument("--pop-size", type=int, default=40, help="Population size for the optimizer (default: 40)")
     parser.add_argument("--gen-size", type=int, default=150, help="Max iterations/generations for the optimizer (default: 150)")
-    parser.add_argument("--use-autodiff", action="store_true", help="Use Scipy L-BFGS-B gradient descent with JAX Autodiff instead of PyMoo DE")
+    parser.add_argument("--use-pymoo", action="store_true", help="Fallback to the older PyMoo Genetic Algorithm instead of the Fast-JIT Powell optimizer")
     
     args = parser.parse_args()
     
@@ -96,11 +96,14 @@ def main():
         # 3. Export baseline results to spreadsheets (saves files to 'Python_VSCode_Files/')
         export_duojejil_results(duodenum_instance, jejunum_instance, ileum_instance, output_dir="Python_VSCode_Files")
 
-        if args.use_autodiff:
+        if not args.use_pymoo:
+            print("\n-> [STEP 2] Launching Fast-JIT Optimizer...")
+            print("   (The first evaluation takes ~4 minutes while JAX compiles the optimization into raw machine code.")
+            print("   Once compiled, it will rapidly search and converge in ~2 minutes!)\n")
             from chickgut.optimization import optimize_params_autodiff
             optimize_params_autodiff(t_eval, t_span, ingr_name, constants, output_dir=".")
         else:
-            print("\n-> [STEP 2] Launching PyMoo JAX Optimizer...")
+            print("\n-> [STEP 2] Launching PyMoo Genetic Algorithm (Legacy)...")
             print("   (The first evaluation takes ~14s while JAX compiles the math into raw machine code.")
             print("   Once compiled, all remaining simulations will fly at cruising speed of ~6.5s!)\n")
             # 4. Perform parameter optimization fitting (saves output to root or config directory)

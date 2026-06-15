@@ -262,12 +262,12 @@ class Jejunum():
 
         self.UJexit_SS = diffrax.diffeqsolve(
             diffrax.ODETerm(_method_of_lines_Jej_CPu_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0_u, args=args_u, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0_u, args=args_u, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
         
         self.SlJexit_SS = diffrax.diffeqsolve(
             diffrax.ODETerm(_method_of_lines_Jej_CPsl_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0_sl, args=args_sl, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0_sl, args=args_sl, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
         
     def flatten_result_jej_CPu(self):
@@ -330,7 +330,7 @@ class Jejunum():
 
         self.RJexit_SS = diffrax.diffeqsolve(
             diffrax.ODETerm(_method_of_lines_CPr_Jej_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0_r, args=args_r, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0_r, args=args_r, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
 
     def flatten_result_jej_CPr(self):
@@ -365,7 +365,7 @@ class Jejunum():
 
         self.result_feed_jej = diffrax.diffeqsolve(
             diffrax.ODETerm(_feed_jej_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0, args=args_feed, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0, args=args_feed, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
     
     def flatten_result_jej_feed(self):

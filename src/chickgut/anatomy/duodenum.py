@@ -289,13 +289,13 @@ class Duodenum():
 
         self.UDexit_SS = diffrax.diffeqsolve(
             diffrax.ODETerm(_method_of_lines_CPu_Duo_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0_u, args=args_u, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0_u, args=args_u, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
         
         with time_block("Solving duodenum slowly-digested protein equations"):
             self.SlDexit_SS = diffrax.diffeqsolve(
                 diffrax.ODETerm(_method_of_lines_CPsl_Duo_jax), solver, t0=t0, t1=t1, dt0=0.1,
-                y0=y0_sl, args=args_sl, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+                y0=y0_sl, args=args_sl, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
             )
 
     def flatten_result_duo_CPu(self):
@@ -363,7 +363,7 @@ class Duodenum():
 
         self.RDexit_SS = diffrax.diffeqsolve(
             diffrax.ODETerm(_method_of_lines_CPr_Duo_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0_r, args=args_r, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0_r, args=args_r, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
 
     def flatten_result_duo_CPr(self):
@@ -399,7 +399,7 @@ class Duodenum():
 
         self.result_feed_duo = diffrax.diffeqsolve(
             diffrax.ODETerm(_feed_duo_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0, args=args_feed, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0, args=args_feed, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
     
     def flatten_result_duo_feed(self):

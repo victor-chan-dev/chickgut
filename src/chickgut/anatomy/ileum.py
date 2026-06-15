@@ -249,12 +249,12 @@ class Ileum():
 
         self.UIexit_SS = diffrax.diffeqsolve(
             diffrax.ODETerm(_method_of_lines_Ileum_CPu_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0_u, args=args_u, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0_u, args=args_u, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
         
         self.SlIexit_SS = diffrax.diffeqsolve(
             diffrax.ODETerm(_method_of_lines_Ileum_CPsl_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0_sl, args=args_sl, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0_sl, args=args_sl, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
 
     def flatten_result_il_CPu(self):
@@ -305,7 +305,7 @@ class Ileum():
         y0_r = jnp.zeros(len(self.init_Il_CPr)).at[0].set(self.RJexit_SS.ys[-1, -1] / self.Il_single_node_V)
         args_r = (self.RJexit_SS, self.SlIexit_SS, self.VF, jnp.array(self.IlV_cm3), self.Kp_Jej_min, self.Il_single_node_V, self.k_absp, self.k_digestrate)
         
-        solver = diffrax.Tsit5()
+        solver = diffrax.Kvaerno5()
         stepsize_controller = diffrax.PIDController(rtol=1e-3, atol=1e-6)
         saveat = diffrax.SaveAt(ts=jnp.array(self.t_eval), dense=True)
         t0 = self.t_span[0]
@@ -313,7 +313,7 @@ class Ileum():
 
         self.RIexit_SS = diffrax.diffeqsolve(
             diffrax.ODETerm(_method_of_lines_CPr_Il_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0_r, args=args_r, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0_r, args=args_r, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
     
     def flatten_result_il_CPr(self):
@@ -340,7 +340,7 @@ class Ileum():
         y0 = jnp.array(self.iIl_g)
         args_feed = (self.result_feed_jej, self.Kp_Jej_min, self.Kp_Il_min)
         
-        solver = diffrax.Tsit5()
+        solver = diffrax.Kvaerno5()
         stepsize_controller = diffrax.PIDController(rtol=1e-3, atol=1e-6)
         saveat = diffrax.SaveAt(ts=jnp.array(self.t_eval), dense=True)
         t0 = self.t_span[0]
@@ -348,7 +348,7 @@ class Ileum():
 
         self.result_feed_il = diffrax.diffeqsolve(
             diffrax.ODETerm(_feed_il_jax), solver, t0=t0, t1=t1, dt0=0.1,
-            y0=y0, args=args_feed, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            y0=y0, args=args_feed, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000, adjoint=diffrax.DirectAdjoint()
         )
     
     def flatten_result_il_feed(self):

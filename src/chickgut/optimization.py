@@ -231,20 +231,34 @@ def optimize_params_autodiff(t_eval, t_span, ingr_name, constants, output_dir=".
         pred_protein = (1 - (sum_flux_total / FI_24h_gbird)) * 100
         return jnp.sum((pred_protein - target_protein) ** 2)
         
-    value_and_grad_fn = jax.jit(jax.value_and_grad(loss_fn, argnums=0), static_argnames=['t_eval', 't_span', 'constants_tuple', 'iDuo_g', 'BWeight_kgb', 'Kp_PVG_min'])
+    import datetime
+    eval_state = {'count': 0, 'start_time': time.time()}
     
     def scipy_objective(x):
-        val, grad = value_and_grad_fn(
+        eval_state['count'] += 1
+        elapsed = time.time() - eval_state['start_time']
+        
+        # Powell averages ~200-300 evaluations. We estimate 250 for the ETA.
+        avg_time = elapsed / eval_state['count']
+        remaining = max(0, 250 - eval_state['count'])
+        eta_sec = remaining * avg_time
+        
+        eta_str = f"{int(eta_sec // 60):02d}:{int(eta_sec % 60):02d}"
+        elapsed_str = f"{int(elapsed // 60):02d}:{int(elapsed % 60):02d}"
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        print(f"[{current_time}] Eval {eval_state['count']:03d} | X: k_absp={x[0]:.4f}, k_dig={x[1]:.4f}, Kp_endog={x[2]:.4f} | Elapsed: {elapsed_str} | ETA: ~{eta_str} ... ", end='', flush=True)
+        val = loss_fn(
             jnp.array(x), tuple(t_eval), t_span, tuple(constants.items()), fore_t, fore_y, tuple(iDuo_g), BWeight_kgb, Kp_PVG_min
         )
-        print(f"Eval X: k_absp={x[0]:.4f}, k_dig={x[1]:.4f}, Kp_endog={x[2]:.4f} | Loss: {val:.4f}")
-        return float(val), np.array(grad, dtype=np.float64)
+        print(f"Loss: {val:12.4f}  <-- (Target: 0.0000)", flush=True)
+        return float(val)
         
     # Standard initial guess (industry standard fallback)
     x0 = np.array([63.7867, 0.0878, 0.0142])
     bounds = [(0.001, 100.0), (0.001, 0.1), (0.001, 0.1)]
     
-    res = scipy_minimize(scipy_objective, x0, method='L-BFGS-B', jac=True, bounds=bounds, options={'disp': True})
+    res = scipy_minimize(scipy_objective, x0, method='Powell', bounds=bounds, options={'disp': True})
     
     print("\nAutodiff Optimization Complete!")
     print(f"best K_absp_opt: {res.x[0]}")
