@@ -30,14 +30,12 @@ def optimize_params(t_eval, t_span, ingr_name, constants, output_dir="."):
         Kp_endog_min = opt_params[2]
 
         try:
-            # Solve ODEs
+            # Solve ODEs (bypassing Pandas for speed)
             duodenum_instance, jejunum_instance, ileum_instance, df_fore = run_simulation(
-                ingr_name, constants, k_absp, k_digestrate, Kp_endog_min, t_eval, t_span
+                ingr_name, constants, k_absp, k_digestrate, Kp_endog_min, t_eval, t_span, export_dataframes=False
             )
             
-            sum_RI_flux = np.sum(ileum_instance.df_RP_i.iloc[0:2001, 2]) 
-            sum_UI_flux = np.sum(ileum_instance.df_UP_i.iloc[0:2001, 2])
-            sum_SlI_flux = np.sum(ileum_instance.df_SlP_i.iloc[0:2001, 2])
+            sum_UI_flux, sum_SlI_flux, sum_RI_flux = ileum_instance.get_flux_sums(limit=2001)
             
             sum_flux_total = sum_RI_flux + sum_UI_flux + sum_SlI_flux 
 

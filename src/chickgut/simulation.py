@@ -24,7 +24,7 @@ Kp_endog_min = 0.01428015551135433
 # setup output directories if needed (imported from os)
 csv_datafiles = 'Python_VSCode_Files'
 
-def run_simulation(ingr_name, constants, k_absp, k_digestrate, Kp_endog_min, t_eval, t_span):
+def run_simulation(ingr_name, constants, k_absp, k_digestrate, Kp_endog_min, t_eval, t_span, export_dataframes=True):
     """
     Solves the foregut simulation (crop, proventriculus/gizzard) and hindgut simulation.
     Returns (duodenum_instance, jejunum_instance, ileum_instance, df_fore).
@@ -156,12 +156,12 @@ def run_simulation(ingr_name, constants, k_absp, k_digestrate, Kp_endog_min, t_e
     
     duodenum_instance, jejunum_instance, ileum_instance = HindGIT(
         ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog_min, 
-        result_fore, iDuo_g, BWeight_kgb, Kp_PVG_min
+        result_fore, iDuo_g, BWeight_kgb, Kp_PVG_min, export_dataframes
     )
     return duodenum_instance, jejunum_instance, ileum_instance, df_fore
 
 @time_it
-def HindGIT(ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog_min, result_fore, iDuo_g, BWeight_kgb, Kp_PVG_min):
+def HindGIT(ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog_min, result_fore, iDuo_g, BWeight_kgb, Kp_PVG_min, export_dataframes=True):
     # 1. creating duodenum, jejunum and ileum
     duodenum_instance = Duodenum(t_span, iDuo_g, t_eval, result_fore, BWeight_kgb, Kp_PVG_min, constants, k_absp, k_digestrate, Kp_endog_min)
     jejunum_instance = Jejunum(t_span, t_eval, constants, BWeight_kgb, k_absp, k_digestrate, Kp_endog_min)
@@ -190,10 +190,11 @@ def HindGIT(ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog
             duodenum_instance.solving_duo_R()
             duodenum_instance.solving_duo_feed()
         with time_block("Flattening duodenum results"):
-            duodenum_instance.flatten_result_duo_CPu()
-            duodenum_instance.flatten_result_duo_CPsl()
-            duodenum_instance.flatten_result_duo_CPr()
-            duodenum_instance.flatten_result_duo_feed()
+            if export_dataframes:
+                duodenum_instance.flatten_result_duo_CPu()
+                duodenum_instance.flatten_result_duo_CPsl()
+                duodenum_instance.flatten_result_duo_CPr()
+                duodenum_instance.flatten_result_duo_feed()
         Duo_single_node_V = duodenum_instance.calculate_duo_prop()
         Kp_Duo_min = duodenum_instance.calculate_duo_prop()
         print("finished duodenum")
@@ -206,10 +207,11 @@ def HindGIT(ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog
             jejunum_instance.solving_jej_R()
             jejunum_instance.solving_jej_feed()
         with time_block("Flattening jejunum results"):
-            jejunum_instance.flatten_result_jej_CPu()
-            jejunum_instance.flatten_result_jej_CPsl()
-            jejunum_instance.flatten_result_jej_CPr()
-            jejunum_instance.flatten_result_jej_feed()
+            if export_dataframes:
+                jejunum_instance.flatten_result_jej_CPu()
+                jejunum_instance.flatten_result_jej_CPsl()
+                jejunum_instance.flatten_result_jej_CPr()
+                jejunum_instance.flatten_result_jej_feed()
         Discretize_jej = jejunum_instance.calculate_jej_prop()
         print("finished jejunum")
 
@@ -222,10 +224,11 @@ def HindGIT(ingr_name, t_eval, t_span, constants, k_absp, k_digestrate, Kp_endog
             ileum_instance.solving_il_R()
             ileum_instance.solving_il_feed()
         with time_block("Flattening ileum results"):
-            ileum_instance.flatten_result_il_CPu()
-            ileum_instance.flatten_result_il_CPsl()
-            ileum_instance.flatten_result_il_CPr()
-        ileum_instance.flatten_result_il_feed()
+            if export_dataframes:
+                ileum_instance.flatten_result_il_CPu()
+                ileum_instance.flatten_result_il_CPsl()
+                ileum_instance.flatten_result_il_CPr()
+                ileum_instance.flatten_result_il_feed()
         print("finished ileum")
     
     return duodenum_instance, jejunum_instance, ileum_instance

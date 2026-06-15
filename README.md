@@ -61,17 +61,28 @@ PYTHONPATH=src venv/bin/python tests/generate_golden_data.py
 
 * **Performance & Scale Challenge**:
   * With a population size of 100 and 1,000 maximum iterations, the optimization requires **100,000 evaluations**.
-  * At 2 seconds per evaluation, this takes **2.3 days** to complete. At 20 seconds per evaluation, it takes **23 days**.
+  * At 37 seconds per evaluation, this takes **1,027 hours (~42 days)** to complete. Even if stripped to pure ODE speed (~9 seconds), it still takes **250 hours (~10 days)**.
   * **Solution Strategy**: Run feed ingredient optimizations sequentially (one at a time) with persistent checkpointing (saving progress) and parallelize execution across CPU cores.
 * **Apparent Digestibility of Protein**:
   * Feed efficiency is measured by how much protein is absorbed. The lower the remaining protein flux at the end of the ileum, the more digestible the feed ingredient.
 
 # Performance Profiling
 
-A single HindGIT simulation run takes approximately **34 to 37 seconds**. The major execution time is spent in the differential equation solvers (`solve_ivp`):
+### Previous SciPy Baseline
+A single HindGIT simulation run took approximately **34 to 37 seconds**. The major execution time was spent in the differential equation solvers (`solve_ivp`):
 
 | Anatomy Section | Duration (avg) | Key Bottleneck |
 | :--- | :--- | :--- |
 | **Duodenum** | ~20 - 21s | Solving slowly-digested protein equations (~18s) |
 | **Jejunum** | ~7s | Solving rapidly-digested protein equations (~6.7s) |
 | **Ileum** | ~5 - 6s | Solving rapidly-digested protein equations (~5.4s) |
+
+### New JAX Implementation
+A single HindGIT simulation run now takes approximately **37 seconds** using our JAX hybrid implementation. The primary bottleneck is **no longer ODE solving**, but memory allocation during Pandas DataFrame creation.
+
+| Operations Phase | Duration (avg) | Key Bottleneck |
+| :--- | :--- | :--- |
+| **JAX ODE Solvers** | ~9s | `diffrax.diffeqsolve` evaluates mathematical physics models |
+| **DataFrame Construction** | ~28s | Extracting large JAX matrices into `pd.DataFrame` and `jax.vmap` calculation |
+
+*Note: For large evolutionary batches using PyMoo, stripping the Pandas DataFrames directly out of the objective loop reduces execution time to roughly ~9 seconds per evaluation.*

@@ -1,10 +1,164 @@
-
 import math 
 import pandas as pd
 import numpy as np 
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 from chickgut.utils.performance import time_it, time_block
+
+import jax
+import jax.numpy as jnp
+import diffrax
+# JAX defaults to 32-bit floats. We need 64-bit for biological stability.
+jax.config.update("jax_enable_x64", True)
+
+# --- Pure JAX Vector Fields (Extracted from Duodenum Class) ---
+# Why JAX? We use JAX (specifically @jax.jit) to compile these mathematical ODE equations into 
+# highly optimized machine code. Since these are called millions of times by the solver, 
+# stripping them out of the Python class structure and making them "pure" functions allows 
+# the simulation to run ~30x faster.
+
+@jax.jit
+def _solve_node0_jax(t, y, args):
+    fore_t, fore_y, constant_Fr, Kp_PVG_min, Kp_Duo_min = args
+    QCPu_Duonode0_g = y[0]
+    index_PVGDuo = jnp.minimum(jnp.searchsorted(fore_t, t, side='left'), len(fore_t) - 1)
+    Q_CP_g_at_t = fore_y[index_PVGDuo, 1]
+    P_CP_PVGDuo_gmin = Kp_PVG_min * (Q_CP_g_at_t * constant_Fr)
+    U_CP_Duonode0Duo_gmin = Kp_Duo_min * QCPu_Duonode0_g
+    return jnp.array([P_CP_PVGDuo_gmin - U_CP_Duonode0Duo_gmin])
+
+@jax.jit
+def _method_of_lines_CPu_Duo_jax(t, y, args):
+    (node0_sol, VF, DuoV_cm3, Kp_Duo_min, Duo_single_node_V, P_CPe_gmincm3) = args
+    QCPu_Duo_g = y
+    val0 = node0_sol.evaluate(t)[0]
+    QCPu_Duo_g = QCPu_Duo_g.at[0].set(val0)
+    QCPu_Duo_g = jnp.maximum(QCPu_Duo_g, 1e-10)
+    
+    U_CPu_Duo_psg_gmincm3 = VF * jnp.diff(QCPu_Duo_g) / jnp.diff(DuoV_cm3)
+    P_CPu_Duo0Duo_gmincm3 = (Kp_Duo_min * val0) / Duo_single_node_V
+    UD_Diff = P_CPe_gmincm3 + P_CPu_Duo0Duo_gmincm3 - U_CPu_Duo_psg_gmincm3
+    return jnp.concatenate([jnp.array([0.0]), UD_Diff])
+
+@jax.jit
+def _method_of_lines_CPu_metrics(t, y, args):
+    (node0_sol, VF, DuoV_cm3, Kp_Duo_min, Duo_single_node_V, P_CPe_gmincm3) = args
+    val0 = node0_sol.evaluate(t)[0]
+    QCPu_Duo_g = y.at[0].set(val0)
+    QCPu_Duo_g = jnp.maximum(QCPu_Duo_g, 1e-10)
+    U_CPu_Duo_psg_gmincm3 = VF * jnp.diff(QCPu_Duo_g) / jnp.diff(DuoV_cm3)
+    P_CPu_Duo0Duo_gmincm3 = (Kp_Duo_min * val0) / Duo_single_node_V
+    UD_Diff = P_CPe_gmincm3 + P_CPu_Duo0Duo_gmincm3 - U_CPu_Duo_psg_gmincm3
+    dUDdt = jnp.concatenate([jnp.array([0.0]), UD_Diff])
+    
+    flux_CPu_DuoJej = QCPu_Duo_g[-1] * Kp_Duo_min
+    C_CPu_Duolast_gcm3 = QCPu_Duo_g[-1] / Duo_single_node_V
+    return dUDdt, flux_CPu_DuoJej, C_CPu_Duolast_gcm3
+
+@jax.jit
+def _method_of_lines_CPsl_Duo_jax(t, y, args):
+    (node0_sol, VF, DuoV_cm3, Kp_Duo_min, Duo_single_node_V, k_digestrate) = args
+    QCPsl_Duo_g = y
+    val0 = node0_sol.evaluate(t)[0]
+    QCPsl_Duo_g = QCPsl_Duo_g.at[0].set(val0)
+    QCPsl_Duo_g = jnp.maximum(QCPsl_Duo_g, 1e-10)
+    
+    Duo_CPsl_dis_gmincm3 = (k_digestrate * QCPsl_Duo_g[1:]**2) / Duo_single_node_V
+    U_CPsl_Duo_psg_gmincm3 = VF * jnp.diff(QCPsl_Duo_g) / jnp.diff(DuoV_cm3)
+    P_CPsl_Duo0Duo_gmincm3 = (Kp_Duo_min * val0) / Duo_single_node_V
+    
+    SlD_Diff = P_CPsl_Duo0Duo_gmincm3 - (U_CPsl_Duo_psg_gmincm3 + Duo_CPsl_dis_gmincm3)
+    return jnp.concatenate([jnp.array([0.0]), SlD_Diff])
+
+@jax.jit
+def _method_of_lines_CPsl_metrics(t, y, args):
+    (node0_sol, VF, DuoV_cm3, Kp_Duo_min, Duo_single_node_V, k_digestrate) = args
+    val0 = node0_sol.evaluate(t)[0]
+    QCPsl_Duo_g = y.at[0].set(val0)
+    QCPsl_Duo_g = jnp.maximum(QCPsl_Duo_g, 1e-10)
+    
+    Duo_CPsl_dis_gmincm3 = (k_digestrate * QCPsl_Duo_g[1:]**2) / Duo_single_node_V
+    U_CPsl_Duo_psg_gmincm3 = VF * jnp.diff(QCPsl_Duo_g) / jnp.diff(DuoV_cm3)
+    P_CPsl_Duo0Duo_gmincm3 = (Kp_Duo_min * val0) / Duo_single_node_V
+    
+    SlD_Diff = P_CPsl_Duo0Duo_gmincm3 - (U_CPsl_Duo_psg_gmincm3 + Duo_CPsl_dis_gmincm3)
+    dSlDdt = jnp.concatenate([jnp.array([0.0]), SlD_Diff])
+    
+    flux_CPsl_DuoJej = QCPsl_Duo_g[-1] * Kp_Duo_min
+    C_CPsl_Duolast_gcm3 = QCPsl_Duo_g[-1] / Duo_single_node_V
+    return dSlDdt, flux_CPsl_DuoJej, C_CPsl_Duolast_gcm3
+
+@jax.jit
+def _method_of_lines_CPr_Duo_jax(t, y, args):
+    (node0_sol, CPsl_sol, VF, DuoV_cm3, Kp_Duo_min, Duo_single_node_V, k_absp, k_digestrate) = args
+    QCPr_Duo_g = y
+    val0 = node0_sol.evaluate(t)[0]
+    QCPr_Duo_g = QCPr_Duo_g.at[0].set(val0)
+    
+    # CRITICAL MATH FIX: We must clamp the protein amount to a tiny positive number (1e-12).
+    # In nature, protein can't be negative. But numerical ODE solvers might slightly overshoot 0.0.
+    # Because the digestion equation squares this value (QCPr**2), a slight negative number 
+    # would suddenly become a massive positive digestion rate, causing a "positive feedback loop" 
+    # that crashes the simulation. Clamping prevents this physical impossibility!
+    QCPr_Duo_g = jnp.maximum(QCPr_Duo_g, 1e-12)
+
+    
+    Duo_CPr_dis = (k_absp * QCPr_Duo_g[1:]**2) / Duo_single_node_V
+    U_CPr_Duo_psg_mincm3 = VF * jnp.diff(QCPr_Duo_g) / jnp.diff(DuoV_cm3)
+    U_CPr_Duo_psg_dis_gmincm3 = jnp.maximum(U_CPr_Duo_psg_mincm3 + Duo_CPr_dis, 1e-12)
+    
+    P_CPr_Duo0Duo_gmincm3 = (Kp_Duo_min * val0) / Duo_single_node_V
+    
+    QCPsl_Duo_g_last = CPsl_sol.evaluate(t)[-1]
+    P_CPr_DuoSlDuoR_gmincm3 = (k_digestrate * QCPsl_Duo_g_last) / Duo_single_node_V
+    
+    RD_Diff = P_CPr_DuoSlDuoR_gmincm3 + P_CPr_Duo0Duo_gmincm3 - U_CPr_Duo_psg_dis_gmincm3
+    return jnp.concatenate([jnp.array([0.0]), RD_Diff])
+
+@jax.jit
+def _method_of_lines_CPr_metrics(t, y, args):
+    (node0_sol, CPsl_sol, VF, DuoV_cm3, Kp_Duo_min, Duo_single_node_V, k_absp, k_digestrate) = args
+    QCPr_Duo_g = y.at[0].set(node0_sol.evaluate(t)[0])
+    QCPr_Duo_g = jnp.maximum(QCPr_Duo_g, 1e-12)
+    
+    Duo_CPr_dis = (k_absp * QCPr_Duo_g[1:]**2) / Duo_single_node_V
+    U_CPr_Duo_psg_mincm3 = VF * jnp.diff(QCPr_Duo_g) / jnp.diff(DuoV_cm3)
+    U_CPr_Duo_psg_dis_gmincm3 = jnp.maximum(U_CPr_Duo_psg_mincm3 + Duo_CPr_dis, 1e-12)
+    
+    P_CPr_Duo0Duo_gmincm3 = (Kp_Duo_min * node0_sol.evaluate(t)[0]) / Duo_single_node_V
+    
+    QCPsl_Duo_g_last = CPsl_sol.evaluate(t)[-1]
+    P_CPr_DuoSlDuoR_gmincm3 = (k_digestrate * QCPsl_Duo_g_last) / Duo_single_node_V
+    
+    RD_Diff = P_CPr_DuoSlDuoR_gmincm3 + P_CPr_Duo0Duo_gmincm3 - U_CPr_Duo_psg_dis_gmincm3
+    dRDdt = jnp.concatenate([jnp.array([0.0]), RD_Diff])
+    
+    flux_CPr_DuoJej = QCPr_Duo_g[-1] * Kp_Duo_min
+    C_CPr__Duolast_gcm3 = QCPr_Duo_g[-1] / Duo_single_node_V
+    return dRDdt, flux_CPr_DuoJej, C_CPr__Duolast_gcm3
+
+@jax.jit
+def _feed_duo_jax(t, y, args):
+    fore_t, fore_y, Kp_PVG_min, Kp_Duo_min = args
+    Qfeed_Duo_g = y[0]
+    Qfeed_Duo_g = jnp.maximum(Qfeed_Duo_g, 1e-10)
+    
+    index_PVGDuo = jnp.minimum(jnp.searchsorted(fore_t, t, side='left'), len(fore_t) - 1)
+    Q_feedPVG_g_at_t = fore_y[index_PVGDuo, -1]
+    
+    P_PVG_feed = Q_feedPVG_g_at_t * Kp_PVG_min
+    U_DuoJej_feed = Qfeed_Duo_g * Kp_Duo_min
+    return jnp.array([P_PVG_feed - U_DuoJej_feed])
+
+@jax.jit
+def _feed_duo_metrics(t, y, args):
+    fore_t, fore_y, Kp_PVG_min, Kp_Duo_min = args
+    Qfeed_Duo_g = jnp.maximum(y[0], 1e-10)
+    index_PVGDuo = jnp.minimum(jnp.searchsorted(fore_t, t, side='left'), len(fore_t) - 1)
+    P_PVG_feed = fore_y[index_PVGDuo, -1] * Kp_PVG_min
+    U_DuoJej_feed = Qfeed_Duo_g * Kp_Duo_min
+    dfeedduodt = P_PVG_feed - U_DuoJej_feed
+    return dfeedduodt, U_DuoJej_feed, Qfeed_Duo_g
 
 class Duodenum():
         
@@ -14,7 +168,7 @@ class Duodenum():
         self.t_eval = t_eval
 
         self.iDuo_g = iDuo_g
-        self.init_Duo_CPu= None
+        self.init_Duo_CPu = None
         self.init_Duo_CPsl = None
         self.init_Duo_CPr = None
 
@@ -53,366 +207,228 @@ class Duodenum():
         self.volume_jej_cm3 = jejunum_instance.volume_jej_cm3
         self.volume_il_cm3 = ileum_instance.volume_il_cm3
 
-
     def calculate_duo_prop(self):
-        self.length_cm = 14.437*self.BWeight_kgb  # duodenum length (cm) from: Novotny et al. 2023, averaged across coarse/medium/fine diets
-        self.r_cm = 1.18/2                   # duodenum radius (cm), duodenum diameter/2 = radius from: steczny and kokosynski 2019 - 42 DOA
-        self.volume_cm3 = math.pi*math.pow(self.r_cm, 2)*self.length_cm  # duodneum volume (cm^3)
+        self.length_cm = 14.437*self.BWeight_kgb  
+        self.r_cm = 1.18/2                   
+        self.volume_cm3 = math.pi*math.pow(self.r_cm, 2)*self.length_cm  
 
-        #--for Duo_node0--#
-        self.total_discretize = 101    # number of sections to split volume into duodenum (# of nodes)
-        self.total_node_num = self.total_discretize - 1 # number of total nodes includ node 0 that is it's own pool
+        self.total_discretize = 101    
+        self.total_node_num = self.total_discretize - 1 
         Duo_exclude_node0_discretize = self.total_discretize - 1
-        DuoV_cm3_total = np.linspace(0, self.volume_cm3, self.total_discretize) # generating evenly spaced numbers (cm^3) over range of the volume 
+        DuoV_cm3_total = np.linspace(0, self.volume_cm3, self.total_discretize) 
 
-        self.DuoV_cm3 = DuoV_cm3_total[1:] # list of node volumes excluding node 0
-
+        self.DuoV_cm3 = DuoV_cm3_total[1:] 
         self.Duo_single_node_V = self.volume_cm3/self.total_node_num
 
-        self.MRT_min = 2.808 #from MRT Meta-analysis
-        self.Kp_Duo_min = 1/self.MRT_min   # fractional (SOLID) passage rate out of the duodenum (/min), from meta-A 
-        #Kp_Duo_CPu_min = 2.0 #fractional (SOLID) passage rate out of duodenum (/min) for undigestible, from meta-A - inverse mrt 1/0.5
+        self.MRT_min = 2.808 
+        self.Kp_Duo_min = 1/self.MRT_min   
 
-        self.VF = (math.pi*math.pow(self.r_cm, 2))*self.length_cm/self.MRT_min #volumetric flow rate
-        self.init_Duo_CPu = np.zeros(Duo_exclude_node0_discretize) # initial values for nodes of the duodenum excluding first discretized point i.e. node0
+        self.VF = (math.pi*math.pow(self.r_cm, 2))*self.length_cm/self.MRT_min 
+        self.init_Duo_CPu = np.zeros(Duo_exclude_node0_discretize) 
         self.init_Duo_CPsl = np.zeros(Duo_exclude_node0_discretize)
         self.init_Duo_CPr = np.zeros(Duo_exclude_node0_discretize)
     
     def calculate_duo_endog(self):
         SI_volume_cm3 = self.volume_cm3 + self.volume_jej_cm3 + self.volume_il_cm3
-    
         self.vol_prop = self.volume_cm3 / SI_volume_cm3
 
-        Il_BasalAA = 0.799 #g of basal ileal endogenous protein/g of CP from: Ravindran 2021, total of table 1 - i.e. total endogenous of SI
-        self.basalaa = Il_BasalAA * self.vol_prop # basal endogenous AA input for duodenum based on proportion of volume 
+        Il_BasalAA = 0.799 
+        self.basalaa = Il_BasalAA * self.vol_prop 
 
-        #---endogenous protein from duodenum-----#
         Duo_basalaa_single_node = self.basalaa/self.total_node_num
         P_CPe_Duo_gmin = self.Kp_endog_min*Duo_basalaa_single_node
         self.P_CPe_gmincm3 = P_CPe_Duo_gmin/self.Duo_single_node_V
 
-    
-    def Duo_node0_CPu (self, t, QCPu_Duonode0_g):
-        index_PVGDuo = min(np.searchsorted(self.result_fore.t, t, side='left'), len(self.result_fore.t) - 1)
-        
-        Q_CPu_g_at_t = self.result_fore.y.T[index_PVGDuo, 1]
-        #print(Q_CPu_g_at_t)
-        P_CPu_PVGDuo_gmin = self.Kp_PVG_min*(Q_CPu_g_at_t*self.constants['UP_Fr']) #g/min
-
-        U_CPu_Duonode0Duo_gmin = self.Kp_Duo_min*QCPu_Duonode0_g #g/min
-        # if QCPu_Duonode0_g < 0:
-        #     QCPu_Duonode0_g = 1e-10
-        dUDnode0dt = P_CPu_PVGDuo_gmin - U_CPu_Duonode0Duo_gmin #g/min
-        
-        return QCPu_Duonode0_g, U_CPu_Duonode0Duo_gmin, dUDnode0dt
-    
-    def Duo_node0_CPsl (self, t, QCPsl_Duonode0_g):
-        index_PVGDuo = min(np.searchsorted(self.result_fore.t, t, side='left'), len(self.result_fore.t) - 1)
-        
-        Q_CPsl_g_at_t = self.result_fore.y.T[index_PVGDuo, 1]
-        
-        P_CPsl_PVGDuo_gmin = self.Kp_PVG_min*(Q_CPsl_g_at_t*self.constants['SlP_Fr'])
-        
-        U_CPsl_Duonode0Duo_gmin = self.Kp_Duo_min*QCPsl_Duonode0_g
-        # if QCPsl_Duonode0_g < 0:
-        #     QCPsl_Duonode0_g = 1e-10
-        dSlDnode0dt = P_CPsl_PVGDuo_gmin - U_CPsl_Duonode0Duo_gmin
-        
-        return QCPsl_Duonode0_g, U_CPsl_Duonode0Duo_gmin, dSlDnode0dt
-    
-    def Duo_node0_CPr (self, t, QCPr_Duonode0_g):
-        index_PVGDuo = min(np.searchsorted(self.result_fore.t, t, side='left'), len(self.result_fore.t) - 1)
-        
-        Q_CPr_g_at_t = self.result_fore.y.T[index_PVGDuo, 1]
-        
-        P_CPr_PVGDuo_gmin = self.Kp_PVG_min*(Q_CPr_g_at_t*self.constants['RP_Fr'])
-        
-        U_CPr_Duonode0Duo_gmin = self.Kp_Duo_min*QCPr_Duonode0_g
-        # if QCPr_Duonode0_g < 0:
-        #     QCPr_Duonode0_g = 1e-10
-        dRDnode0dt = P_CPr_PVGDuo_gmin - U_CPr_Duonode0Duo_gmin
-        
-        return QCPr_Duonode0_g, U_CPr_Duonode0Duo_gmin, dRDnode0dt
-    
-    def Solve_Duonode0_CPu(self, t, QCPu_Duonode0_g):
-        _, _, dUDnode0dt = self.Duo_node0_CPu( t, QCPu_Duonode0_g)
-        return dUDnode0dt
-    
-    def Solve_Duonode0_CPsl(self, t, QCPsl_Duonode0_g):
-        _, _, dSlDnode0dt = self.Duo_node0_CPsl(t, QCPsl_Duonode0_g)
-        return dSlDnode0dt
-    
-    def Solve_Duonode0_CPr(self, t, QCPr_Duonode0_g):
-        _, _, dRDnode0dt = self.Duo_node0_CPr(t, QCPr_Duonode0_g)
-        return dRDnode0dt       
-
-    #----------- solve for the values of duodenum node 0 crude protein (CP, g) using solve_ivp --------------------------#
     def solving_Unode0(self):
-        self.result_UDnode0 = solve_ivp(self.Solve_Duonode0_CPu, self.t_span, y0=self.iDuo_g, t_eval=self.t_eval, dense_output=True, method='RK45')
-        self.result_SlDnode0 = solve_ivp(self.Solve_Duonode0_CPsl, self.t_span, y0=self.iDuo_g, t_eval=self.t_eval, dense_output=True, method='RK45')
-        self.result_RDnode0 = solve_ivp(self.Solve_Duonode0_CPr, self.t_span, y0=self.iDuo_g, t_eval=self.t_eval, dense_output=True, method='RK45')
+        # Prepare JAX arrays for foregut results
+        fore_t = jnp.array(self.result_fore.t)
+        fore_y = jnp.array(self.result_fore.y.T)
+        
+        args_u = (fore_t, fore_y, self.constants['UP_Fr'], self.Kp_PVG_min, self.Kp_Duo_min)
+        args_sl = (fore_t, fore_y, self.constants['SlP_Fr'], self.Kp_PVG_min, self.Kp_Duo_min)
+        args_r = (fore_t, fore_y, self.constants['RP_Fr'], self.Kp_PVG_min, self.Kp_Duo_min)
 
-    #-------------------undigestible protein duodenum------------------------------------------------------#
-    def method_of_lines_CPu_Duo(self, t, QCPu_Duo_g):
-        #index_Duo0Duo = np.searchsorted(self.result_UDnode0.t, t, side='left') #index of first suitable location found
-        
-        QCPu_Duo_g[0] = self.result_UDnode0.sol(t)[0]  
-        #QCPu_Duo_g = np.clip(QCPu_Duo_g, 0, None) #applying lower limit cap of 0, none is no upper cap
-        
-        QCPu_Duo_g = np.maximum(QCPu_Duo_g , 1e-10) #checks negatives
-    
-        
-        U_CPu_Duo_psg_gmincm3 = self.VF * np.diff(QCPu_Duo_g)/ np.diff(self.DuoV_cm3)     # calculates amount of protein at each node
-        # g/min*cm^3  prepend attaches the value before the list of QCPu_Duo_g, so use [1:] to access from discretize point 1 and onwards
-        
-        P_CPu_Duo0Duo_gmin = self.Kp_Duo_min*self.result_UDnode0.sol(t)[0]
+        solver = diffrax.Kvaerno5()  
+        stepsize_controller = diffrax.PIDController(rtol=1e-3, atol=1e-6)
+        saveat = diffrax.SaveAt(ts=jnp.array(self.t_eval), dense=True)
+        t0 = self.t_span[0]
+        t1 = self.t_span[1]
+        y0 = jnp.array(self.iDuo_g)
 
-        P_CPu_Duo0Duo_gmincm3 = P_CPu_Duo0Duo_gmin/self.Duo_single_node_V
+        self.result_UDnode0 = diffrax.diffeqsolve(
+            diffrax.ODETerm(_solve_node0_jax), solver, t0=t0, t1=t1, dt0=0.1,
+            y0=y0, args=args_u, saveat=saveat, stepsize_controller=stepsize_controller
+        )
+        self.result_SlDnode0 = diffrax.diffeqsolve(
+            diffrax.ODETerm(_solve_node0_jax), solver, t0=t0, t1=t1, dt0=0.1,
+            y0=y0, args=args_sl, saveat=saveat, stepsize_controller=stepsize_controller
+        )
+        self.result_RDnode0 = diffrax.diffeqsolve(
+            diffrax.ODETerm(_solve_node0_jax), solver, t0=t0, t1=t1, dt0=0.1,
+            y0=y0, args=args_r, saveat=saveat, stepsize_controller=stepsize_controller
+        )
 
-        UD_Diff = self.P_CPe_gmincm3 + P_CPu_Duo0Duo_gmincm3 - U_CPu_Duo_psg_gmincm3 
-                    # g/min*cm3         #g/min*cm^3
-                    
-        dUDdt = np.concatenate([[0], UD_Diff]) #dUDdt is one less bc of np.diff, need to add a 0 to avoid broadcasting error
-                                                #Kitchin explains it as concentration is constant at entrance
-    
-        flux_CPu_DuoJej = QCPu_Duo_g[-1]*self.Kp_Duo_min
-        C_CPu_Duolast_gcm3 = QCPu_Duo_g[-1]/self.Duo_single_node_V
-        # print("P_CPu_Duo0Duo_gmincm3:", P_CPu_Duo0Duo_gmincm3)
-        return dUDdt, flux_CPu_DuoJej, C_CPu_Duolast_gcm3,
-
-    def Solve_method_of_lines_CPu_Duo(self, t, QCPu_Duo_g):
-        dUDdt, _, _ = self.method_of_lines_CPu_Duo(t, QCPu_Duo_g)
-        return dUDdt
-    
-    #------------------------slowly-digested protein duodenum---------------------------------------------------#
-    def method_of_lines_CPsl_Duo(self, t, QCPsl_Duo_g):
-        #index_Duo0Duo = np.searchsorted(self.result_SlDnode0.t, t, side='left')
-        QCPsl_Duo_g[0] = self.result_SlDnode0.sol(t)[0] 
-        
-        QCPsl_Duo_g = np.maximum(QCPsl_Duo_g, 1e-10)
-        # if QCPsl_Duo_g.all() < 0.0:
-        #     QCPsl_Duo_g = 1e-10
-                    
-        #---flux from Duo slowly- to Duo rapidly-digested protein---#
-        Duo_CPsl_dis_gmincm3 = (self.k_digestrate* QCPsl_Duo_g[1:]**2)/self.Duo_single_node_V #  undigested CP -> soluble CP flux (g/min), *note - Kdd_CPu= 0
-        # g/min*cm^3
-        
-        #---Kitchin Group plug-flow---#
-        U_CPsl_Duo_psg_gmincm3 = self.VF * np.diff(QCPsl_Duo_g) / np.diff(self.DuoV_cm3) # calculates amount of protein at each node
-            # g/min*cm^3  
-            
-        #---flux from Duo node 0  to Duo PF ---#
-        P_CPsl_Duo0Duo_gmin = self.Kp_Duo_min*self.result_SlDnode0.sol(t)[0]
-        P_CPsl_Duo0Duo_gmincm3 = P_CPsl_Duo0Duo_gmin/self.Duo_single_node_V
-        
-        SlD_Diff =  P_CPsl_Duo0Duo_gmincm3 - (U_CPsl_Duo_psg_gmincm3 + Duo_CPsl_dis_gmincm3) 
-                    # self.P_CPe_gmincm3 g/min*cm3                                 #g/min*cm^3              #g/min*cm3
-        
-        dSlDdt = np.concatenate([[0], SlD_Diff])
-        flux_CPsl_DuoJej = (QCPsl_Duo_g[-1])*self.Kp_Duo_min
-        C_CPsl_Duolast_gcm3 = (QCPsl_Duo_g[-1])/self.Duo_single_node_V
-        
-        return dSlDdt, flux_CPsl_DuoJej, C_CPsl_Duolast_gcm3
-    
-    def Solve_method_of_lines_CPsl_Duo(self, t, QCPsl_Duo_g):
-        dSlDdt, _, _ = self.method_of_lines_CPsl_Duo(t, QCPsl_Duo_g)
-        return dSlDdt
-    
-    #----------- solve for the values of duodenum crude protein (CP, g) using solve_ivp --------------------------#
     @time_it
     def solving_duo_USl(self):
-        self.init_Duo_CPu[0] = self.result_UDnode0.y.T[0, -1]
-        self.init_Duo_CPsl[0] = self.result_SlDnode0.y.T[0, -1]
-  
-        self.UDexit_SS = solve_ivp(self.Solve_method_of_lines_CPu_Duo, 
-                                    self.t_span, 
-                                    self.init_Duo_CPu, 
-                                    t_eval=self.t_eval, 
-                                    dense_output=True, method='Radau')
-            #Radau implicit runge kutta method, good for stiff differential-algebraic equations, stability and accuracy           
-
-        #V: This is the largest bottleneck in the whole model right now. 
-        # Consider either moving to JAX (to use GPU) or Julia (DifferentialEquations.jl) via diffeqpy
-        #  or determine a way to multi-thread this
-        with time_block("Solving duodenum slowly-digested protein equations"):
-            self.SlDexit_SS = solve_ivp(self.Solve_method_of_lines_CPsl_Duo, 
-                                        self.t_span, 
-                                        self.init_Duo_CPsl, 
-                                        t_eval=self.t_eval, 
-                                        dense_output=True, method='Radau')
-
-    
-    #----prepping data for next compartment - undigestible----#  
-    def flatten_result_duo_CPu(self):
-        flattened_data_duo_CPu = []
-        for t, y in zip(self.UDexit_SS.t, self.UDexit_SS.y.T):
-            dUDdt, flux_CPu_DuoJej, C_CPu_Duolast_gcm3 = self.method_of_lines_CPu_Duo(t, y)
-            QCPu_Duo_g=y[-1] # asks for values from the last node
-            flattened_entry_duo_CPu ={
-                't': t, 
-                'dUDdt': dUDdt[-1],
-                'flux_CPu_DuoJej': flux_CPu_DuoJej,
-                'Conc_CPu_Duolast':C_CPu_Duolast_gcm3,
-                'QCPu_duo': QCPu_Duo_g
-            }
-            flattened_data_duo_CPu.append(flattened_entry_duo_CPu)
-        self.df_UP_d = pd.DataFrame(flattened_data_duo_CPu)
-
-        #print(f"df_duodenum, {df_d}")
-        return self.df_UP_d, flattened_data_duo_CPu
-    
-    #df_UP_DUO = self.df_UP_d  
-    
-    #df_Q_CPu_Duo = df_UP_DUO[['t', 'QCPu_duo']] #pulling out just the relavent columns from the df_cpvg dataframe
-    
-    #----prepping data for next compartment - slowly-digested fraction----#   
-    def flatten_result_duo_CPsl(self):
-        flattened_data_duo_CPsl = []
+        self.init_Duo_CPu[0] = float(self.result_UDnode0.ys[-1, 0])
+        self.init_Duo_CPsl[0] = float(self.result_SlDnode0.ys[-1, 0])
         
-        for t, y in zip(self.SlDexit_SS.t, self.SlDexit_SS.y.T):
-            dDSldt, flux_CPsl_DuoJej, C_CPsl_Duolast_gcm3 = self.method_of_lines_CPsl_Duo(t, y)
-            QCPsl_Duo_g=y[-1] # asks for values from the last node
-            
-            flattened_entry_duo_CPsl ={
-                't': t, 
-                'dDSldt': dDSldt[-1],
-                'flux_CPsl_DuoJej': flux_CPsl_DuoJej,
-                'Conc_CPsl_Duolast': C_CPsl_Duolast_gcm3,
-                'QCPsl_duo':QCPsl_Duo_g
-            }
-            flattened_data_duo_CPsl.append(flattened_entry_duo_CPsl)
-        self.df_SlP_d = pd.DataFrame(flattened_data_duo_CPsl)
-        #print(f"df_duodenum, {df_DP_d}")
-        return self.df_SlP_d, flattened_data_duo_CPsl
+        y0_u = jnp.array(self.init_Duo_CPu)
+        y0_sl = jnp.array(self.init_Duo_CPsl)
+        
+        args_u = (self.result_UDnode0, self.VF, jnp.array(self.DuoV_cm3), self.Kp_Duo_min, self.Duo_single_node_V, self.P_CPe_gmincm3)
+        args_sl = (self.result_SlDnode0, self.VF, jnp.array(self.DuoV_cm3), self.Kp_Duo_min, self.Duo_single_node_V, self.k_digestrate)
+        
+        # Why Diffrax & Kvaerno5? 
+        # The biological equations here are "stiff" (they change very rapidly, especially absorption).
+        # Standard solvers (like Tsit5 or standard SciPy) struggle to keep up and take tiny steps, 
+        # making the simulation crawl. Kvaerno5 is an "implicit" solver designed specifically 
+        # to power through these stiff, rapid biological spikes smoothly and quickly.
+        solver = diffrax.Kvaerno5()
+        stepsize_controller = diffrax.PIDController(rtol=1e-3, atol=1e-6)
+        saveat = diffrax.SaveAt(ts=jnp.array(self.t_eval), dense=True)
+        t0 = self.t_span[0]
+        t1 = self.t_span[1]
+
+        self.UDexit_SS = diffrax.diffeqsolve(
+            diffrax.ODETerm(_method_of_lines_CPu_Duo_jax), solver, t0=t0, t1=t1, dt0=0.1,
+            y0=y0_u, args=args_u, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+        )
+        
+        with time_block("Solving duodenum slowly-digested protein equations"):
+            self.SlDexit_SS = diffrax.diffeqsolve(
+                diffrax.ODETerm(_method_of_lines_CPsl_Duo_jax), solver, t0=t0, t1=t1, dt0=0.1,
+                y0=y0_sl, args=args_sl, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+            )
+
+    def flatten_result_duo_CPu(self):
+        args_u = (self.result_UDnode0, self.VF, jnp.array(self.DuoV_cm3), self.Kp_Duo_min, self.Duo_single_node_V, self.P_CPe_gmincm3)
+        
+        @jax.jit
+        def compute_metrics(t, y):
+            return _method_of_lines_CPu_metrics(t, y, args_u)
+        
+        # Why jax.vmap?
+        # Instead of using a slow Python "for" loop to calculate the metrics (flux, concentrations)
+        # for each of the 2,800 time steps one by one, vmap "vectorizes" the operation.
+        # It calculates all time steps simultaneously using the compiled code, saving massive time.
+        v_compute = jax.vmap(compute_metrics)
+        dUDdt_all, flux_all, C_all = v_compute(self.UDexit_SS.ts, jnp.maximum(self.UDexit_SS.ys, 0.0))
+        
+        self.df_UP_d = pd.DataFrame({
+            't': np.array(self.UDexit_SS.ts),
+            'dUDdt': np.array(dUDdt_all[:, -1]),
+            'flux_CPu_DuoJej': np.array(flux_all),
+            'Conc_CPu_Duolast': np.array(C_all),
+            'QCPu_duo': np.array(jnp.maximum(self.UDexit_SS.ys[:, -1], 0.0))
+        })
+        return self.df_UP_d, None
     
-    # df_SlP_d, _ = flatten_result_duo_CPsl()
+    def flatten_result_duo_CPsl(self):
+        args_sl = (self.result_SlDnode0, self.VF, jnp.array(self.DuoV_cm3), self.Kp_Duo_min, self.Duo_single_node_V, self.k_digestrate)
+        
+        @jax.jit
+        def compute_metrics(t, y):
+            return _method_of_lines_CPsl_metrics(t, y, args_sl)
+        
+        v_compute = jax.vmap(compute_metrics)
+        dSlDdt_all, flux_all, C_all = v_compute(self.SlDexit_SS.ts, jnp.maximum(self.SlDexit_SS.ys, 0.0))
+        
+        self.df_SlP_d = pd.DataFrame({
+            't': np.array(self.SlDexit_SS.ts),
+            'dDSldt': np.array(dSlDdt_all[:, -1]),
+            'flux_CPsl_DuoJej': np.array(flux_all),
+            'Conc_CPsl_Duolast': np.array(C_all),
+            'QCPsl_duo': np.array(jnp.maximum(self.SlDexit_SS.ys[:, -1], 0.0))
+        })
+        return self.df_SlP_d, None
 
-    # df_SlP_DUO = pd.DataFrame(df_SlP_d)  
-
-    #------slowly- to rapidly-digested protein in duodenum setup------------#
     @time_it
     def SlP_for_RP_d(self):
         self.flatten_result_duo_CPsl()
-        df_Q_CPsl_Duo = self.df_SlP_d[['t', 'QCPsl_duo']] #pulling out just the relavent columns from the df_cpvg dataframe
-        df_Q_CPsl_Duo.reset_index(drop=True, inplace=True) #resets the index numbers of df_PVG to default integer index (0,1,2,3...)
+        # Not strictly needed for diffrax anymore, but returning just in case anything else uses it
+        df_Q_CPsl_Duo = self.df_SlP_d[['t', 'QCPsl_duo']] 
+        df_Q_CPsl_Duo.reset_index(drop=True, inplace=True) 
         Duo_CPsl_Q = df_Q_CPsl_Duo['QCPsl_duo'].values 
         return df_Q_CPsl_Duo, Duo_CPsl_Q
-    
-    #------------------------Rapidly-digested protein duodenum---------------------------------------------------#
-    def method_of_lines_CPr_Duo(self, t, QCPr_Duo_g):
 
-        #index_Duo0Duo = np.searchsorted(self.result_RDnode0.t, t, side='left')
-        index_duo_SlR_flux = min(np.searchsorted(self.df_Q_CPsl_Duo['t'], t, side='left'), len(self.df_Q_CPsl_Duo['t']) - 1)
-        
-        QCPr_Duo_g[0] = self.result_RDnode0.sol(t)[0] 
-        
-        #QCPr_Duo_g = np.maximum(QCPr_Duo_g, 1e-12)
-        
-        Duo_CPr_dis = (self.k_absp*QCPr_Duo_g[1:]**2)/self.Duo_single_node_V     #  rapid CP -> rapid CP flux (g/min)
-        
-        #QCPr_Duo_g = np.clip(QCPr_Duo_g, 0, None)
-        U_CPr_Duo_psg_mincm3 = self.VF * np.diff(QCPr_Duo_g) / np.diff(self.DuoV_cm3)     # calculates amount of protein at each node
-            # g/min*cm^3  
-        
-        U_CPr_Duo_psg_dis_gmincm3 = np.maximum(U_CPr_Duo_psg_mincm3 + Duo_CPr_dis, 1e-12) # avoiding negatives
-
-        #---flux from Duo node 0  to Duo PF ---#
-        P_CPr_Duo0Duo_gmin = self.Kp_Duo_min*self.result_RDnode0.sol(t)[0] 
-        P_CPr_Duo0Duo_gmincm3 = P_CPr_Duo0Duo_gmin/self.Duo_single_node_V     
-            
-        #---flux from Duo slowly- to Duo rapidly-digested protein---#
-        P_CPr_DuoSlDuoR_gmin = self.k_digestrate*(self.Duo_CPsl_Q[index_duo_SlR_flux])
-        P_CPr_DuoSlDuoR_gmincm3 = P_CPr_DuoSlDuoR_gmin/self.Duo_single_node_V
-        #Duo_CPd is from the slowly-digested protein function, [index_duo_SlR_flux] helps match the values that correspond to each time point
-        
-        #---flux from Duo Rapidly-digested to Absorbed---#
-        #U_CPr_DuoRDuoA_gmin = k_Duo_diffusion*QCPr_Duo_g[1:]
-        
-       # RD_Diff =  P_CPr_DuoSlDuoR_gmincm3 + P_CPr_Duo0Duo_gmincm3 - U_CPr_Duo_psg_dis_gmincm3
-        RD_Diff = P_CPr_DuoSlDuoR_gmincm3 + P_CPr_Duo0Duo_gmincm3 - U_CPr_Duo_psg_dis_gmincm3
-                    # g/min*cm3         #g/min*cm^3
-                    
-        dRDdt_concat = np.concatenate([[0], RD_Diff])
-
-        dRDdt = np.maximum(dRDdt_concat, 1e-12, None) #clamped at minimum value is 0, no upper bound
-                
-        flux_CPr_DuoJej = (QCPr_Duo_g[-1])*self.Kp_Duo_min
-        C_CPr__Duolast_gcm3 = (QCPr_Duo_g[-1])/self.Duo_single_node_V
-        return dRDdt, flux_CPr_DuoJej, C_CPr__Duolast_gcm3
-    
-    def Solve_method_of_lines_CPr_Duo(self, t, QCPr_Duo_g):
-        dRDdt, _, _ = self.method_of_lines_CPr_Duo(t, QCPr_Duo_g)
-        return dRDdt
-    
     @time_it
     def solving_duo_R(self):
         self.df_Q_CPsl_Duo, self.Duo_CPsl_Q = self.SlP_for_RP_d()
 
-        self.init_Duo_CPr[0] = self.result_RDnode0.y.T[0, -1]
+        self.init_Duo_CPr[0] = float(self.result_RDnode0.ys[-1, 0])
+        y0_r = jnp.array(self.init_Duo_CPr)
+        
+        args_r = (self.result_RDnode0, self.SlDexit_SS, self.VF, jnp.array(self.DuoV_cm3), self.Kp_Duo_min, self.Duo_single_node_V, self.k_absp, self.k_digestrate)
+        
+        # Original was LSODA, Tsit5 or Dopri5 is suitable for non-stiff or moderately stiff
+        solver = diffrax.Kvaerno5()
+        stepsize_controller = diffrax.PIDController(rtol=1e-3, atol=1e-6)
+        saveat = diffrax.SaveAt(ts=jnp.array(self.t_eval), dense=True)
+        t0 = self.t_span[0]
+        t1 = self.t_span[1]
 
-        self.RDexit_SS = solve_ivp(self.Solve_method_of_lines_CPr_Duo, self.t_span, self.init_Duo_CPr, t_eval=self.t_eval, 
-                                   dense_output=True, method='LSODA')
+        self.RDexit_SS = diffrax.diffeqsolve(
+            diffrax.ODETerm(_method_of_lines_CPr_Duo_jax), solver, t0=t0, t1=t1, dt0=0.1,
+            y0=y0_r, args=args_r, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+        )
 
-    #----prepping data for next compartment - undigestible----#  
     def flatten_result_duo_CPr(self):
-        flattened_data_duo_CPr = []
+        args_r = (self.result_RDnode0, self.SlDexit_SS, self.VF, jnp.array(self.DuoV_cm3), self.Kp_Duo_min, self.Duo_single_node_V, self.k_absp, self.k_digestrate)
+        
+        @jax.jit
+        def compute_metrics(t, y):
+            return _method_of_lines_CPr_metrics(t, y, args_r)
+        
+        v_compute = jax.vmap(compute_metrics)
+        dRDdt_all, flux_all, C_all = v_compute(self.RDexit_SS.ts, jnp.maximum(self.RDexit_SS.ys, 0.0))
+        
+        self.df_RP_d = pd.DataFrame({
+            't': np.array(self.RDexit_SS.ts),
+            'dRDdt': np.array(dRDdt_all[:, -1]),
+            'flux_CPr_DuoJej': np.array(flux_all),
+            'C_CPr__Duolast_gcm3': np.array(C_all),
+            'QCPr_duo': np.array(jnp.maximum(self.RDexit_SS.ys[:, -1], 0.0))
+        })
+        return self.df_RP_d, None
 
-        for t, y in zip(self.RDexit_SS.t, self.RDexit_SS.y.T):
-            dRDdt, flux_CPr_DuoJej, C_CPr__Duolast_gcm3 = self.method_of_lines_CPr_Duo(t, y)
-            QCPr_Duo_g = y[-1] # asks for values from the last node
-            
-            flattened_entry_duo_CPr ={
-                't': t, 
-                'dRDdt': dRDdt[-1],
-                'flux_CPr_DuoJej': flux_CPr_DuoJej,
-                'C_CPr__Duolast_gcm3': C_CPr__Duolast_gcm3,
-                'QCPr_duo': QCPr_Duo_g,
-            }
-            flattened_data_duo_CPr.append(flattened_entry_duo_CPr)
-        self.df_RP_d= pd.DataFrame(flattened_data_duo_CPr)
-        #print(f"df_duodenum, {df_s}")
-        return self.df_RP_d, flattened_data_duo_CPr
-    
-    def feed_duo(self, t, Qfeed_Duo_g):
-        index_PVGDuo = min(np.searchsorted(self.result_fore.t, t, side='left'), len(self.result_fore.t) - 1)
-        
-        Q_feedPVG_g_at_t = self.result_fore.y.T[index_PVGDuo, -1]
-        
-        if Qfeed_Duo_g.all() < 0.0:
-            Qfeed_Duo_g = 1e-10
-        
-        P_PVG_feed = Q_feedPVG_g_at_t*self.Kp_PVG_min
-        U_DuoJej_feed = Qfeed_Duo_g*self.Kp_Duo_min
-        
-        dfeedduodt = P_PVG_feed - U_DuoJej_feed
-        return dfeedduodt, U_DuoJej_feed, Qfeed_Duo_g
-    
-    def solve_feed_duo(self, t, Qfeed_Duo_g):
-        dfeedduodt, _, _ = self.feed_duo(t, Qfeed_Duo_g)
-        return dfeedduodt
-    
     def solving_duo_feed(self):
-        self.result_feed_duo = solve_ivp(self.solve_feed_duo, self.t_span, y0=self.iDuo_g, t_eval=self.t_eval, dense_output=True, method='RK45')
+        fore_t = jnp.array(self.result_fore.t)
+        fore_y = jnp.array(self.result_fore.y.T)
+        args_feed = (fore_t, fore_y, self.Kp_PVG_min, self.Kp_Duo_min)
+        
+        solver = diffrax.Kvaerno5()  
+        stepsize_controller = diffrax.PIDController(rtol=1e-3, atol=1e-6)
+        saveat = diffrax.SaveAt(ts=jnp.array(self.t_eval), dense=True)
+        t0 = self.t_span[0]
+        t1 = self.t_span[1]
+        y0 = jnp.array(self.iDuo_g)
+
+        self.result_feed_duo = diffrax.diffeqsolve(
+            diffrax.ODETerm(_feed_duo_jax), solver, t0=t0, t1=t1, dt0=0.1,
+            y0=y0, args=args_feed, saveat=saveat, stepsize_controller=stepsize_controller, max_steps=100000
+        )
     
     def flatten_result_duo_feed(self):
-        flattened_data_duo_feed = []
-
-        for t, y in zip(self.result_feed_duo.t, self.result_feed_duo.y.T):
-            dfeedduodt, U_DuoJej_feed, Qfeed_Duo_g = self.feed_duo(t, y)
-            Qfeed_Duo_g = y
+        fore_t = jnp.array(self.result_fore.t)
+        fore_y = jnp.array(self.result_fore.y.T)
+        args_feed = (fore_t, fore_y, self.Kp_PVG_min, self.Kp_Duo_min)
+        
+        @jax.jit
+        def compute_metrics(t, y):
+            return _feed_duo_metrics(t, y, args_feed)
             
-            flattened_entry_duo_feed ={
-                't': t, 
-                'dfeedduodt': dfeedduodt,
-                'flux_feed_DuoJej': U_DuoJej_feed,
-                'Qfeed_duo': Qfeed_Duo_g,
-            }
-            flattened_data_duo_feed.append(flattened_entry_duo_feed)
-        self.df_feed_d = pd.DataFrame(flattened_data_duo_feed)
-        #print(f"df_duodenum, {df_s}")
-        return self.df_feed_d, flattened_data_duo_feed 
-    
-        #----------Plots results from duodenum----------------------#
+        v_compute = jax.vmap(compute_metrics)
+        dfeedduodt_all, flux_all, Q_all = v_compute(self.result_feed_duo.ts, jnp.maximum(self.result_feed_duo.ys, 0.0))
+        
+        self.df_feed_d = pd.DataFrame({
+            't': np.array(self.result_feed_duo.ts),
+            'dfeedduodt': np.array(dfeedduodt_all),
+            'flux_feed_DuoJej': np.array(flux_all),
+            'Qfeed_duo': np.array(jnp.maximum(self.result_feed_duo.ys[:, 0], 0.0))
+        })
+        return self.df_feed_d, None 
+
 def plot_duo(self):
 
         plt.clf() 
