@@ -98,8 +98,9 @@ PYTHONPATH=src venv/bin/python tests/generate_golden_data.py
 * **Performance & Scale Challenge**:
   * Original assumption: With a population size of 100 and 1,000 maximum iterations, the optimization would require **100,000 evaluations**. At 37s per evaluation, this would take **~42 days**.
   * Realistic optimization bounds: Since we are only optimizing 3 parameters (`k_absp`, `k_digestrate`, `Kp_endog_min`), standard Differential Evolution rules dictate a population size of 10-20x the parameter count (~40) and convergence within ~150 iterations. This yields a realistic max of **6,000 evaluations**.
-  * With our JAX/Pandas-bypass dropping single evaluation time to ~6.9s, 6,000 evaluations takes **~11.5 hours** on a single core.
-  * **Solution Strategy**: Implement `pymoo` to parallelize execution across CPU cores. On a standard 12-core system, a single feed ingredient optimization will drop from 11.5 hours down to **~57 minutes**.
+  * With our JAX/Pandas-bypass dropping single evaluation time to ~6.0s, 6,000 evaluations takes **~9.5 hours** on a single machine.
+  * **The JAX Paradox (Parallelization Strategy)**: We originally estimated `pymoo` could parallelize these evaluations to drop the time to ~1 hour. However, we discovered that JAX's `diffrax` engine uses XLA, which inherently multi-threads *inside* a single ODE solve, perfectly saturating all physical CPU cores on its own! 
+  * Attempting to parallelize *across* evaluations via PyMoo spawned 64+ threads, causing catastrophic thread contention and slowing evaluations from 6s to 50s. The mathematically optimal execution strategy is **sequential PyMoo evaluation**, taking **~9.5 hours** per ingredient and successfully hitting a perfect `SSE: 0.0000` fit.
 * **Apparent Digestibility of Protein**:
   * Feed efficiency is measured by how much protein is absorbed. The lower the remaining protein flux at the end of the ileum, the more digestible the feed ingredient.
 
@@ -119,7 +120,7 @@ A single HindGIT simulation run now takes approximately **37 seconds** using our
 
 | Operations Phase | Duration (avg) | Key Bottleneck |
 | :--- | :--- | :--- |
-| **JAX ODE Solvers** | ~9s | `diffrax.diffeqsolve` evaluates mathematical physics models |
+| **JAX ODE Solvers** | ~6s | `diffrax.diffeqsolve` evaluates mathematical physics models, heavily utilizing all CPU cores |
 | **DataFrame Construction** | ~28s | Extracting large JAX matrices into `pd.DataFrame` and `jax.vmap` calculation |
 
-*Note: For large evolutionary batches using PyMoo, stripping the Pandas DataFrames directly out of the objective loop reduces execution time to roughly ~9 seconds per evaluation.*
+*Note: For large evolutionary batches using PyMoo, stripping the Pandas DataFrames directly out of the objective loop reduces execution time to roughly ~6.0 seconds per evaluation.*

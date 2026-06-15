@@ -138,8 +138,7 @@ def optimize_params(t_eval, t_span, ingr_name, constants, output_dir=".", n_thre
         t_eval=t_eval, 
         t_span=t_span, 
         ingr_name=ingr_name, 
-        constants=constants, 
-        elementwise_runner=pool.map
+        constants=constants
     )
     
     # Set up the Differential Evolution algorithm
