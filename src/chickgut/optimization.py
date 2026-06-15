@@ -232,15 +232,23 @@ def optimize_params_autodiff(t_eval, t_span, ingr_name, constants, output_dir=".
         return jnp.sum((pred_protein - target_protein) ** 2)
         
     import datetime
-    eval_state = {'count': 0, 'start_time': time.time()}
+    eval_state = {
+        'count': 0, 
+        'start_time': time.time(),
+        'expected_total': 350 # Based on historical benchmarks
+    }
     
     def scipy_objective(x):
         eval_state['count'] += 1
         elapsed = time.time() - eval_state['start_time']
         
-        # Powell averages ~200-300 evaluations. We estimate 250 for the ETA.
+        # Dynamic ETA Updating: If we get within 20 evaluations of the expected total,
+        # but the optimizer hasn't finished yet, we gracefully push the "finish line" back.
+        if eval_state['count'] >= eval_state['expected_total'] - 20:
+            eval_state['expected_total'] += 60
+            
         avg_time = elapsed / eval_state['count']
-        remaining = max(0, 250 - eval_state['count'])
+        remaining = max(0, eval_state['expected_total'] - eval_state['count'])
         eta_sec = remaining * avg_time
         
         eta_str = f"{int(eta_sec // 60):02d}:{int(eta_sec % 60):02d}"
