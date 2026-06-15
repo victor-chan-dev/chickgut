@@ -1,5 +1,7 @@
-.DS_STORE
+.DS_Store
 images/
 __pycache__/
 Python_VSCode_Files/
 venv/
+.coverage
+.pytest_cache/

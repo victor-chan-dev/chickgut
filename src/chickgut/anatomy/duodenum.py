@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np 
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
-from utils.performance import time_it, time_block
+from chickgut.utils.performance import time_it, time_block
 
 class Duodenum():
         
@@ -93,7 +93,7 @@ class Duodenum():
 
     
     def Duo_node0_CPu (self, t, QCPu_Duonode0_g):
-        index_PVGDuo = np.searchsorted(self.result_fore.t, t, side='left')
+        index_PVGDuo = min(np.searchsorted(self.result_fore.t, t, side='left'), len(self.result_fore.t) - 1)
         
         Q_CPu_g_at_t = self.result_fore.y.T[index_PVGDuo, 1]
         #print(Q_CPu_g_at_t)
@@ -107,7 +107,7 @@ class Duodenum():
         return QCPu_Duonode0_g, U_CPu_Duonode0Duo_gmin, dUDnode0dt
     
     def Duo_node0_CPsl (self, t, QCPsl_Duonode0_g):
-        index_PVGDuo = np.searchsorted(self.result_fore.t, t, side='left')
+        index_PVGDuo = min(np.searchsorted(self.result_fore.t, t, side='left'), len(self.result_fore.t) - 1)
         
         Q_CPsl_g_at_t = self.result_fore.y.T[index_PVGDuo, 1]
         
@@ -121,7 +121,7 @@ class Duodenum():
         return QCPsl_Duonode0_g, U_CPsl_Duonode0Duo_gmin, dSlDnode0dt
     
     def Duo_node0_CPr (self, t, QCPr_Duonode0_g):
-        index_PVGDuo = np.searchsorted(self.result_fore.t, t, side='left')
+        index_PVGDuo = min(np.searchsorted(self.result_fore.t, t, side='left'), len(self.result_fore.t) - 1)
         
         Q_CPr_g_at_t = self.result_fore.y.T[index_PVGDuo, 1]
         
@@ -156,7 +156,7 @@ class Duodenum():
     def method_of_lines_CPu_Duo(self, t, QCPu_Duo_g):
         #index_Duo0Duo = np.searchsorted(self.result_UDnode0.t, t, side='left') #index of first suitable location found
         
-        QCPu_Duo_g[0] = self.result_UDnode0.sol(t)  
+        QCPu_Duo_g[0] = self.result_UDnode0.sol(t)[0]  
         #QCPu_Duo_g = np.clip(QCPu_Duo_g, 0, None) #applying lower limit cap of 0, none is no upper cap
         
         QCPu_Duo_g = np.maximum(QCPu_Duo_g , 1e-10) #checks negatives
@@ -165,7 +165,7 @@ class Duodenum():
         U_CPu_Duo_psg_gmincm3 = self.VF * np.diff(QCPu_Duo_g)/ np.diff(self.DuoV_cm3)     # calculates amount of protein at each node
         # g/min*cm^3  prepend attaches the value before the list of QCPu_Duo_g, so use [1:] to access from discretize point 1 and onwards
         
-        P_CPu_Duo0Duo_gmin = self.Kp_Duo_min*self.result_UDnode0.sol(t)
+        P_CPu_Duo0Duo_gmin = self.Kp_Duo_min*self.result_UDnode0.sol(t)[0]
 
         P_CPu_Duo0Duo_gmincm3 = P_CPu_Duo0Duo_gmin/self.Duo_single_node_V
 
@@ -187,7 +187,7 @@ class Duodenum():
     #------------------------slowly-digested protein duodenum---------------------------------------------------#
     def method_of_lines_CPsl_Duo(self, t, QCPsl_Duo_g):
         #index_Duo0Duo = np.searchsorted(self.result_SlDnode0.t, t, side='left')
-        QCPsl_Duo_g[0] = self.result_SlDnode0.sol(t) 
+        QCPsl_Duo_g[0] = self.result_SlDnode0.sol(t)[0] 
         
         QCPsl_Duo_g = np.maximum(QCPsl_Duo_g, 1e-10)
         # if QCPsl_Duo_g.all() < 0.0:
@@ -202,7 +202,7 @@ class Duodenum():
             # g/min*cm^3  
             
         #---flux from Duo node 0  to Duo PF ---#
-        P_CPsl_Duo0Duo_gmin = self.Kp_Duo_min*self.result_SlDnode0.sol(t)
+        P_CPsl_Duo0Duo_gmin = self.Kp_Duo_min*self.result_SlDnode0.sol(t)[0]
         P_CPsl_Duo0Duo_gmincm3 = P_CPsl_Duo0Duo_gmin/self.Duo_single_node_V
         
         SlD_Diff =  P_CPsl_Duo0Duo_gmincm3 - (U_CPsl_Duo_psg_gmincm3 + Duo_CPsl_dis_gmincm3) 
@@ -302,9 +302,9 @@ class Duodenum():
     def method_of_lines_CPr_Duo(self, t, QCPr_Duo_g):
 
         #index_Duo0Duo = np.searchsorted(self.result_RDnode0.t, t, side='left')
-        index_duo_SlR_flux = np.searchsorted(self.df_Q_CPsl_Duo['t'], t, side='left')
+        index_duo_SlR_flux = min(np.searchsorted(self.df_Q_CPsl_Duo['t'], t, side='left'), len(self.df_Q_CPsl_Duo['t']) - 1)
         
-        QCPr_Duo_g[0] = self.result_RDnode0.sol(t) 
+        QCPr_Duo_g[0] = self.result_RDnode0.sol(t)[0] 
         
         #QCPr_Duo_g = np.maximum(QCPr_Duo_g, 1e-12)
         
@@ -317,7 +317,7 @@ class Duodenum():
         U_CPr_Duo_psg_dis_gmincm3 = np.maximum(U_CPr_Duo_psg_mincm3 + Duo_CPr_dis, 1e-12) # avoiding negatives
 
         #---flux from Duo node 0  to Duo PF ---#
-        P_CPr_Duo0Duo_gmin = self.Kp_Duo_min*self.result_RDnode0.sol(t) 
+        P_CPr_Duo0Duo_gmin = self.Kp_Duo_min*self.result_RDnode0.sol(t)[0] 
         P_CPr_Duo0Duo_gmincm3 = P_CPr_Duo0Duo_gmin/self.Duo_single_node_V     
             
         #---flux from Duo slowly- to Duo rapidly-digested protein---#
@@ -374,7 +374,7 @@ class Duodenum():
         return self.df_RP_d, flattened_data_duo_CPr
     
     def feed_duo(self, t, Qfeed_Duo_g):
-        index_PVGDuo = np.searchsorted(self.result_fore.t, t, side='left')
+        index_PVGDuo = min(np.searchsorted(self.result_fore.t, t, side='left'), len(self.result_fore.t) - 1)
         
         Q_feedPVG_g_at_t = self.result_fore.y.T[index_PVGDuo, -1]
         

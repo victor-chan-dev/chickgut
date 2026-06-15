@@ -5,16 +5,41 @@ It's main purpose is to determine which feeds are most optimal by determining ho
 is left after a chicken poops.
 
 # How to run
-* Run the following in bash/terminal
+* Run the following in bash/terminal to run the interactive simulation:
+```bash
+PYTHONPATH=src venv/bin/python -m chickgut.main
 ```
-python PATH_TO_PACKAGE/chickgut/main.py
+
+# Testing
+
+The project has a comprehensive test suite covering both unit and integration tests. All outputs written during testing are directed to sandbox folders to avoid workspace pollution.
+
+### Run All Tests
+To run the full test suite (unit and integration tests) along with a code coverage report:
+```bash
+PYTHONPATH=src venv/bin/pytest --cov=src/chickgut tests/
+```
+
+### Run Unit Tests Only
+Unit tests verify individual components (anatomy physical property calculations, spreadsheet exports, diet characteristics loading, and mock-based parameter optimization runs) without running slow ODE integrations. To run only unit tests:
+```bash
+PYTHONPATH=src venv/bin/pytest -k "not integration" tests/
+```
+
+### Run Integration Tests Only
+Integration tests run a complete simulation for a baseline ingredient and verify numerical output vectors against a stored golden dataset to ensure no mathematical regression. To run only integration tests:
+```bash
+PYTHONPATH=src venv/bin/pytest -k "integration" tests/
+```
+
+### Regenerating Golden Reference Data
+If you modify the underlying ODE physics, anatomy formulas, or base parameters, the regression integration tests will fail. You can regenerate the golden reference pickles by running:
+```bash
+PYTHONPATH=src venv/bin/python tests/generate_golden_data.py
 ```
 
 # Todo List:
 * Move critical code out of main.py and into its own separate area 
-* Write tests to verify existing functionality
-    * Add a code coverage report so I can see what's covered and what's not
-    * Use AI to write the tests. Very light, but necessary since I don't understand all the calculations
 * !Bottlenecks are caused by the `solve_ivp` function. Ideally move to JAX to use GPU instead
 * !Replace existing differential evolution solution with scipy to use pymoo
     * Add checkpointing via pymoo + pickles
@@ -23,65 +48,30 @@ python PATH_TO_PACKAGE/chickgut/main.py
 * Restructure the python code ✅
 * Write a "How do you run this" guide in the ReadMe ✅
 * Time each part to understand bottle necks ✅
+* Write tests to verify existing functionality (pytest suite) ✅
+* Add a code coverage report (pytest-cov) ✅
+* Fix NumPy deprecation warnings during solver runs ✅
+* Add detailed execution logging and time remaining estimates during parameter optimization ✅
 
 ## Maybe
 * *Bonus* - Find out how to implement a Digital Twin-like system where we can have multiple computers computing at once 
     * V: This is not necessary since this would require 2 computers. It's a nice-to-have for something more complex
 
-# Personal Notes
-* Rough calculations show that for the ideal popsize of 100 & maxiter of 1000 it'll be 100K evaluations. 
-    * At 2 seconds per eval, this will take 2.3 days to complete
-    * At the current pace of 20 seconds per eval, it takes 23 days
-    * So instead, for the 2.3 days, have it run each of the feeds in parallel
-* Loop through all of the different feeds
-* optimize_params
-* investigate plug flow
-* Apparent digestability of protein
-    * The less at the end, the more digestable
-        * This tells us how useful the food 
+# Personal Notes & Insights
 
-* Is it better to loop through each one or do 1 at a time?
-    * one at a time
-* Saving progress is great
-* Digital twin?
+* **Performance & Scale Challenge**:
+  * With a population size of 100 and 1,000 maximum iterations, the optimization requires **100,000 evaluations**.
+  * At 2 seconds per evaluation, this takes **2.3 days** to complete. At 20 seconds per evaluation, it takes **23 days**.
+  * **Solution Strategy**: Run feed ingredient optimizations sequentially (one at a time) with persistent checkpointing (saving progress) and parallelize execution across CPU cores.
+* **Apparent Digestibility of Protein**:
+  * Feed efficiency is measured by how much protein is absorbed. The lower the remaining protein flux at the end of the ileum, the more digestible the feed ingredient.
 
-# Performance Notes
-* Function HindGIT took 37.265013s
-    * 20 seconds in DuoDenum
-    * 9 seconds in ileum
-    * 7 seconds in jejunum
+# Performance Profiling
 
-```
-##Evaluation 22
-Function solving_Unode0 took 0.062765s
-Solving duodenum undigestible protein equations took 0.888347 seconds
-Solving duodenum slowly-digested protein equations took 17.913205 seconds
-Function solving_duo_USl took 18.801604s
-Function flatten_result_duo_CPsl took 0.071319s
-Function SlP_for_RP_d took 0.071729s
-Function solving_duo_R took 1.926259s
-Function solving_duo_feed took 0.040284s
-Solving duodenum equations took 20.830977 seconds
-Function flatten_result_duo_CPsl took 0.070310s
-Flattening duodenum results took 0.234086 seconds
-finished duodenum
+A single HindGIT simulation run takes approximately **34 to 37 seconds**. The major execution time is spent in the differential equation solvers (`solve_ivp`):
 
-~~~Calculating duodenum properties took 21.065130 seconds
-Function solving_jej_USl took 0.543761s
-Function solving_jej_R took 6.664935s
-Function solving_jej_feed took 0.013195s
-Solving jejunum equations took 7.221953 seconds
-Flattening jejunum results took 0.212703 seconds
-finished jejunum
-
-~~~Calculating jejunum properties took 7.434720 seconds
-Function solving_il_USl took 0.280376s
-Function solving_il_R took 5.375315s
-Function solving_il_feed took 0.005631s
-Solving ileum equations took 5.661380 seconds
-Flattening ileum results took 0.194890 seconds
-finished ileum
-
-~~~Calculating ileum properties took 5.886197 seconds
-Function HindGIT took 34.386133s
-```
+| Anatomy Section | Duration (avg) | Key Bottleneck |
+| :--- | :--- | :--- |
+| **Duodenum** | ~20 - 21s | Solving slowly-digested protein equations (~18s) |
+| **Jejunum** | ~7s | Solving rapidly-digested protein equations (~6.7s) |
+| **Ileum** | ~5 - 6s | Solving rapidly-digested protein equations (~5.4s) |

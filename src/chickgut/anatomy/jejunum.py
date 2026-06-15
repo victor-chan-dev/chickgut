@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np 
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
-from utils.performance import time_it
+from chickgut.utils.performance import time_it
 
 class Jejunum():
 
@@ -246,7 +246,7 @@ class Jejunum():
 
         #index_jej_CPr = np.searchsorted(duo_time, t, side='left')  # Find index for the time point based on previous compartment
         #index_CPr_DuoJej = np.searchsorted(self.RDexit_SS.t, t, side='left')
-        index_jej_SlR_flux = np.searchsorted(self.df_Q_CPsl_Jej['t'], t, side='left')
+        index_jej_SlR_flux = min(np.searchsorted(self.df_Q_CPsl_Jej['t'], t, side='left'), len(self.df_Q_CPsl_Jej['t']) - 1)
         
         QCPr_Jej_g[0] = self.RDexit_SS.sol(t)[-1]
 

@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np 
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
-from utils.performance import time_it
+from chickgut.utils.performance import time_it
 
 class Ileum():
     
@@ -251,7 +251,7 @@ class Ileum():
         # Find the index in pvg_values that corresponds to the closest time in df_DUO
         # t is assumed to be a time value that matches the time points in df_DUO
         #index_il_CPr = np.searchsorted(self.RJexit_SS.t, t, side='left')  # Find index for the time point based on previous compartment
-        index_il_SlR_flux = np.searchsorted(self.df_Q_CPsl_Il['t'], t, side='left') #for slowly-digested to rapid flux
+        index_il_SlR_flux = min(np.searchsorted(self.df_Q_CPsl_Il['t'], t, side='left'), len(self.df_Q_CPsl_Il['t']) - 1) #for slowly-digested to rapid flux
         
         QCPr_Il_g[0] = self.RJexit_SS.sol(t)[-1]
         
