@@ -374,3 +374,15 @@ class Ileum():
             'Qfeed_il': np.array(self.result_feed_il.ys[:, 0])
         })
         return self.df_feed_i, None 
+
+    def get_flux_sums(self, limit=2001):
+        # Calculate flux from the last node of each fraction
+        flux_u = (self.UIexit_SS.ys[:, -1] / self.Il_single_node_V) * self.Kp_Il_min
+        flux_sl = (self.SlIexit_SS.ys[:, -1] / self.Il_single_node_V) * self.Kp_Il_min
+        flux_r = (self.RIexit_SS.ys[:, -1] / self.Il_single_node_V) * self.Kp_Il_min
+        
+        sum_UI_flux = jnp.sum(flux_u[:limit])
+        sum_SlI_flux = jnp.sum(flux_sl[:limit])
+        sum_RI_flux = jnp.sum(flux_r[:limit])
+        
+        return sum_UI_flux, sum_SlI_flux, sum_RI_flux

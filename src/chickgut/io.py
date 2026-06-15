@@ -64,16 +64,16 @@ def export_duojejil_results(duodenum_instance, jejunum_instance, ileum_instance,
         df_SlP_d = duodenum_instance.df_SlP_d
         df_RP_d = duodenum_instance.df_RP_d
         
-        df_UD = pd.DataFrame(UDexit_SS.y.T, columns=[f'Node_{i}' for i in range(UDexit_SS.y.shape[0])])
-        df_UD['Time'] = UDexit_SS.t
+        df_UD = pd.DataFrame(UDexit_SS.ys, columns=[f'Node_{i}' for i in range(UDexit_SS.ys.shape[1])])
+        df_UD['Time'] = UDexit_SS.ts
         df_UD = df_UD[['Time'] + [col for col in df_UD.columns if col != 'Time']]
 
-        df_SlD = pd.DataFrame(SlDexit_SS.y.T, columns=[f'Node_{i}' for i in range(SlDexit_SS.y.shape[0])])
-        df_SlD['Time'] = SlDexit_SS.t
+        df_SlD = pd.DataFrame(SlDexit_SS.ys, columns=[f'Node_{i}' for i in range(SlDexit_SS.ys.shape[1])])
+        df_SlD['Time'] = SlDexit_SS.ts
         df_SlD = df_SlD[['Time'] + [col for col in df_SlD.columns if col != 'Time']]
         
-        df_RD = pd.DataFrame(RDexit_SS.y.T, columns=[f'Node_{i}' for i in range(RDexit_SS.y.shape[0])])
-        df_RD['Time'] = RDexit_SS.t
+        df_RD = pd.DataFrame(RDexit_SS.ys, columns=[f'Node_{i}' for i in range(RDexit_SS.ys.shape[1])])
+        df_RD['Time'] = RDexit_SS.ts
         df_RD = df_RD[['Time'] + [col for col in df_RD.columns if col != 'Time']]
         
         with pd.ExcelWriter(os.path.join(output_dir, "model_results_duo-Bryan.xlsx"), engine='openpyxl') as writer:
@@ -93,16 +93,16 @@ def export_duojejil_results(duodenum_instance, jejunum_instance, ileum_instance,
         df_SlP_j = jejunum_instance.df_SlP_j
         df_RP_j = jejunum_instance.df_RP_j
         
-        df_UJ = pd.DataFrame(UJexit_SS.y.T, columns=[f'Node_{i}' for i in range(UJexit_SS.y.shape[0])])
-        df_UJ['Time'] = UJexit_SS.t
+        df_UJ = pd.DataFrame(UJexit_SS.ys, columns=[f'Node_{i}' for i in range(UJexit_SS.ys.shape[1])])
+        df_UJ['Time'] = UJexit_SS.ts
         df_UJ = df_UJ[['Time'] + [col for col in df_UJ.columns if col != 'Time']]
 
-        df_SlJ = pd.DataFrame(SlJexit_SS.y.T, columns=[f'Node_{i}' for i in range(SlJexit_SS.y.shape[0])])
-        df_SlJ['Time'] = SlJexit_SS.t
+        df_SlJ = pd.DataFrame(SlJexit_SS.ys, columns=[f'Node_{i}' for i in range(SlJexit_SS.ys.shape[1])])
+        df_SlJ['Time'] = SlJexit_SS.ts
         df_SlJ = df_SlJ[['Time'] + [col for col in df_SlJ.columns if col != 'Time']]
                 
-        df_RJ = pd.DataFrame(RJexit_SS.y.T, columns=[f'Node_{i}' for i in range(RJexit_SS.y.shape[0])])
-        df_RJ['Time'] = RJexit_SS.t
+        df_RJ = pd.DataFrame(RJexit_SS.ys, columns=[f'Node_{i}' for i in range(RJexit_SS.ys.shape[1])])
+        df_RJ['Time'] = RJexit_SS.ts
         df_RJ = df_RJ[['Time'] + [col for col in df_RJ.columns if col != 'Time']]
            
         with pd.ExcelWriter(os.path.join(output_dir, "model_results_jej-Bryan.xlsx"), engine='openpyxl') as writer:
@@ -122,16 +122,16 @@ def export_duojejil_results(duodenum_instance, jejunum_instance, ileum_instance,
         df_SlP_i = ileum_instance.df_SlP_i
         df_RP_i = ileum_instance.df_RP_i
         
-        df_UI = pd.DataFrame(UIexit_SS.y.T, columns=[f'Node_{i}' for i in range(UIexit_SS.y.shape[0])])
-        df_UI['Time'] = UIexit_SS.t
+        df_UI = pd.DataFrame(UIexit_SS.ys, columns=[f'Node_{i}' for i in range(UIexit_SS.ys.shape[1])])
+        df_UI['Time'] = UIexit_SS.ts
         df_UI = df_UI[['Time'] + [col for col in df_UI.columns if col != 'Time']]
         
-        df_SlI = pd.DataFrame(SlIexit_SS.y.T, columns=[f'Node_{i}' for i in range(SlIexit_SS.y.shape[0])])
-        df_SlI['Time'] = SlIexit_SS.t
+        df_SlI = pd.DataFrame(SlIexit_SS.ys, columns=[f'Node_{i}' for i in range(SlIexit_SS.ys.shape[1])])
+        df_SlI['Time'] = SlIexit_SS.ts
         df_SlI = df_SlI[['Time'] + [col for col in df_SlI.columns if col != 'Time']]
         
-        df_RI = pd.DataFrame(RIexit_SS.y.T, columns=[f'Node_{i}' for i in range(RIexit_SS.y.shape[0])])
-        df_RI['Time'] = RIexit_SS.t
+        df_RI = pd.DataFrame(RIexit_SS.ys, columns=[f'Node_{i}' for i in range(RIexit_SS.ys.shape[1])])
+        df_RI['Time'] = RIexit_SS.ts
         df_RI = df_RI[['Time'] + [col for col in df_RI.columns if col != 'Time']]
       
         with pd.ExcelWriter(os.path.join(output_dir, "model_results_ileum-Bryan.xlsx"), engine='openpyxl') as writer:

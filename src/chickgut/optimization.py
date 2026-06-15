@@ -34,6 +34,11 @@ class ChickgutProblem(ElementwiseProblem):
         # This function scores how "good" the optimizer's guess is.
         # x contains the current guessed values for the 3 parameters.
         k_absp, k_digestrate, Kp_endog_min = x
+        
+        import datetime
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{now}] [Ingredient: {self.ingr_name.upper()}] Starting Evaluation: k_absp={k_absp:.4f}, k_dig={k_digestrate:.4f}, Kp_endog={Kp_endog_min:.4f}")
+        
         try:
             # 1. Run the digestive simulation with these guessed parameters.
             # export_dataframes=False skips the heavy spreadsheet generation, making the loop 4x-5x faster!
@@ -64,16 +69,22 @@ class CheckpointCallback(Callback):
     This callback runs at the end of every generation (population evaluation).
     It saves the current state so that if your computer turns off, you don't lose days of progress.
     """
-    def __init__(self, checkpoint_path, protein_data):
+    def __init__(self, checkpoint_path, protein_data, ingr_name, absolute_gen_offset, total_gen):
         super().__init__()
         self.checkpoint_path = checkpoint_path
         self.protein_data = protein_data
+        self.ingr_name = ingr_name
+        self.absolute_gen_offset = absolute_gen_offset
+        self.total_gen = total_gen
+        self.last_gen_time = time.time()
         
     def notify(self, algorithm):
-        # We save only the minimal essential data: the current generation number,
+        abs_gen = self.absolute_gen_offset + algorithm.n_gen
+        
+        # We save only the minimal essential data: the current absolute generation number,
         # the population of parameters, and the best scores.
         state = {
-            'n_gen': algorithm.n_gen,
+            'n_gen': abs_gen,
             'pop': algorithm.pop,
             'opt': algorithm.opt
         }
@@ -83,10 +94,27 @@ class CheckpointCallback(Callback):
             pickle.dump(state, f)
             
         # Logging progress to the terminal for the user
-        gen = algorithm.n_gen
+        import datetime
+        import time
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        current_time = time.time()
+        time_per_gen = current_time - self.last_gen_time
+        
+        # PyMoo fires notify() immediately on startup/resume before doing any math. 
+        # If it took less than 1 second, it's a false reading and we shouldn't update the ETA.
+        if time_per_gen < 1.0:
+            eta_str = "Calculating..."
+        else:
+            self.last_gen_time = current_time
+            gens_remaining = max(0, self.total_gen - abs_gen)
+            eta_seconds = time_per_gen * gens_remaining
+            eta_str = str(datetime.timedelta(seconds=int(eta_seconds)))
+        
         best_sse = float(algorithm.opt.get("F")[0])
         best_x = algorithm.opt.get("X")[0]
-        print(f"Generation {gen} | Best SSE: {best_sse:.4f} | Best X: k_absp={best_x[0]:.4f}, k_dig={best_x[1]:.4f}, Kp_endog={best_x[2]:.4f}")
+        print(f"[{now}] [Ingredient: {self.ingr_name.upper()}] Checkpoint saved successfully!")
+        print(f"[{now}] [Ingredient: {self.ingr_name.upper()}] Generation {abs_gen}/{self.total_gen} complete | ETA: {eta_str} | Best SSE: {best_sse:.4f} | Best X: k_absp={best_x[0]:.4f}, k_dig={best_x[1]:.4f}, Kp_endog={best_x[2]:.4f}\n")
 
 def optimize_params(t_eval, t_span, ingr_name, constants, output_dir=".", n_threads=None, pop_size=40, n_gen=150):
     """
@@ -111,12 +139,12 @@ def optimize_params(t_eval, t_span, ingr_name, constants, output_dir=".", n_thre
         t_span=t_span, 
         ingr_name=ingr_name, 
         constants=constants, 
-        elementwise_evaluation=True, 
-        runner=pool.starmap
+        elementwise_runner=pool.map
     )
     
     # Set up the Differential Evolution algorithm
     algorithm = DE(pop_size=pop_size)
+    absolute_gen_offset = 0
     target_gen = n_gen
     
     # Checkpoint recovery: Did we already run this partially and crash?
@@ -126,10 +154,11 @@ def optimize_params(t_eval, t_span, ingr_name, constants, output_dir=".", n_thre
             state = pickle.load(f)
             # Pick up exactly where we left off by loading the saved population
             algorithm = DE(pop_size=pop_size, sampling=state['pop'])
+            absolute_gen_offset = state['n_gen']
             # Don't run the full n_gen, only run the generations we have left
-            target_gen = max(1, n_gen - state['n_gen'])
+            target_gen = max(1, n_gen - absolute_gen_offset)
         
-    callback = CheckpointCallback(checkpoint_path, constants['target_v_sdis'])
+    callback = CheckpointCallback(checkpoint_path, constants['target_v_sdis'], ingr_name, absolute_gen_offset, n_gen)
     
     # This runs the heavy mathematical optimization loop
     res = minimize(
